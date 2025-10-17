@@ -33,7 +33,7 @@ export default function HomePage() {
       <div className="container mx-auto py-10 px-4">
         <div className="flex items-baseline justify-between">
           <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Welcome{user?.wallet?.address ? `, ${user.wallet.address}` : ""}.</p>
+          <p className="text-sm text-white">Welcome{user?.wallet?.address ? `, ${user.wallet.address}` : ""}.</p>
         </div>
 
         <div className="mt-6 flex gap-2">
@@ -52,11 +52,16 @@ export default function HomePage() {
         </div>
 
         {activeTab === "home" ? (
-          <div className="mt-6 grid gap-6 md:grid-cols-2">
+          <div className="mt-6 grid gap-6">
             <AccountStatusBar />
-            <ProductCard />
-            <PortfolioPanel />
-            <ActivityFeed />
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <h2 className="text-lg font-semibold mb-2">Places to invest</h2>
+                <ProductCard />
+              </div>
+              <PortfolioPanel />
+              <ActivityFeed />
+            </div>
           </div>
         ) : (
           <div className="mt-6 grid gap-6 md:grid-cols-2">

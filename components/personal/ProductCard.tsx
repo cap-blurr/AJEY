@@ -1,14 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getVaultSummary, type VaultSummary } from "@/lib/services/vault";
+import { useEffect, useMemo, useState } from "react";
+import { getVaultSummary, type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError } from "viem";
+import { baseSepolia } from "viem/chains";
+import { AjeyVaultAbi } from "@/abi/AjeyVault";
+ 
 
 export default function ProductCard() {
   const [data, setData] = useState<VaultSummary | null>(null);
   const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const { user } = usePrivy();
+  const { wallets } = useWallets();
+
+  const evmProvider = useMemo(() => {
+    // Privy embeds wallets; in browser we can access window.ethereum
+    if (typeof window !== "undefined" && (window as any).ethereum) {
+      return (window as any).ethereum;
+    }
+    return null;
+  }, []);
 
   useEffect(() => {
-    getVaultSummary().then(setData).catch(() => setData(null));
+    let t: any;
+    const load = () => getVaultSummary().then(setData).catch(() => setData(null));
+    load();
+    t = setInterval(load, 15000);
+    return () => clearInterval(t);
   }, []);
 
   return (
@@ -22,10 +43,10 @@ export default function ProductCard() {
           {open ? "Hide" : "Details"}
         </button>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-4 text-sm">
+      <div className="mt-3 grid grid-cols-4 gap-4 text-sm">
         <div>
           <div className="text-muted-foreground">Total Assets</div>
-          <div>${data?.totalAssetsUSD?.toLocaleString() ?? "—"}</div>
+          <div>{data?.totalAssets ?? "—"}</div>
         </div>
         <div>
           <div className="text-muted-foreground">NAV / Share</div>
@@ -34,6 +55,10 @@ export default function ProductCard() {
         <div>
           <div className="text-muted-foreground">vToken Supply</div>
           <div>{data?.vTokenSupply ?? "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">Est. Yield</div>
+          <div>{estimateYieldText(data)}</div>
         </div>
       </div>
 
@@ -51,17 +76,245 @@ export default function ProductCard() {
               </div>
             ))}
           </div>
+          <div className="mt-3 text-xs text-muted-foreground">
+            {data?.paused ? "Vault paused" : "Vault active"}{data?.ethMode ? " · ETH deposits enabled" : ""}
+          </div>
         </div>
       )}
 
       <div className="mt-4 flex items-center gap-2">
         <input
           type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
           placeholder="Amount"
           className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
         />
-        <button className="rounded-md border px-4 py-2 text-sm">Deposit</button>
+        <button
+          disabled={!amount || submitting}
+          onClick={async () => {
+            if (!ajeyVault) return alert("Vault not configured");
+            try {
+              setSubmitting(true);
+              const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+              const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+              if (!account) throw new Error("No connected address");
+
+              // debug log
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "start", data: { account } }) });
+
+              // Ensure wallet is on Base Sepolia using Privy wallet API where possible
+              try {
+                if (primaryWallet?.switchChain) {
+                  await primaryWallet.switchChain(baseSepolia.id);
+                }
+              } catch {
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "switchChain_failed" }) });
+                throw new Error("Please switch your wallet network to Base Sepolia");
+              }
+
+              // Resolve asset and decimals for proper units
+              const asset = await getAssetAddress();
+              const decimals = (await publicNavigatorReadDecimals(asset)) || 18;
+              const assets = parseUnits(amount, decimals);
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "resolved_amount", data: { asset, decimals, assets: assets.toString() } }) });
+
+              // Build viem wallet client from embedded wallet provider
+              const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
+              const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
+
+              // Log current chain id from provider
+              try {
+                const cid = await (provider as any)?.request?.({ method: "eth_chainId" });
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "pre_tx_chain", data: { chainId: String(cid) } }) });
+              } catch {}
+
+              // Try ETH path first: depositEth(receiver) with value
+              let usedEthPath = false;
+              try {
+                const { publicClient } = await import("@/lib/chain");
+                const sim = await publicClient.simulateContract({
+                  ...(ajeyVault as any),
+                  functionName: "depositEth",
+                  args: [account],
+                  value: assets,
+                  account,
+                } as any);
+                const req: any = sim.request;
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "simulate_depositEth_ok", data: { gas: req.gas?.toString?.(), maxFeePerGas: req.maxFeePerGas?.toString?.(), maxPriorityFeePerGas: req.maxPriorityFeePerGas?.toString?.(), value: req.value?.toString?.() } }) });
+                const hash = await client.writeContract(req);
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "tx_submitted_eth", data: { hash } }) });
+                alert(`Deposit submitted: ${hash}`);
+                usedEthPath = true;
+              } catch (err: any) {
+                let reason: string | undefined;
+                if (err instanceof BaseError) {
+                  const r = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | undefined;
+                  reason = r?.data?.errorName;
+                }
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "simulate_depositEth_failed", data: { reason: reason || err?.message } }) });
+                usedEthPath = false;
+              }
+
+              if (!usedEthPath) {
+                // ERC20 path: if asset is WETH, wrap native ETH first, then approve + deposit(assets, receiver)
+                const { publicClient } = await import("@/lib/chain");
+                const WETH_BASE_CANONICAL = "0x4200000000000000000000000000000000000006";
+
+                if ((asset as string).toLowerCase() === WETH_BASE_CANONICAL.toLowerCase()) {
+                  try {
+                    const simWrap = await publicClient.simulateContract({
+                      address: asset,
+                      abi: [ { name: "deposit", type: "function", stateMutability: "payable", inputs: [], outputs: [] } ] as any,
+                      functionName: "deposit",
+                      args: [],
+                      value: assets,
+                      account,
+                    } as any);
+                    const reqWrap: any = simWrap.request;
+                    fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "simulate_wrap_ok", data: { gas: reqWrap.gas?.toString?.(), value: reqWrap.value?.toString?.() } }) });
+                    const hashWrap = await client.writeContract(reqWrap);
+                    fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "wrap_submitted", data: { hash: hashWrap } }) });
+                  } catch (err: any) {
+                    fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "wrap_failed", data: { message: err?.message } }) });
+                    throw new Error("WETH wrap failed; please ensure ETH balance and try again.");
+                  }
+                }
+                const allowance: bigint = await publicNavigatorReadAllowance(asset, account, ajeyVault.address);
+                if (allowance < assets) {
+                  const simApprove = await publicClient.simulateContract({
+                    address: asset,
+                    abi: ERC20_MIN_ABI as any,
+                    functionName: "approve",
+                    args: [ajeyVault.address, assets],
+                    account,
+                  } as any);
+                  const reqApprove: any = simApprove.request;
+                  fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "simulate_approve_ok", data: { gas: reqApprove.gas?.toString?.(), maxFeePerGas: reqApprove.maxFeePerGas?.toString?.(), maxPriorityFeePerGas: reqApprove.maxPriorityFeePerGas?.toString?.() } }) });
+                  const hashApprove = await client.writeContract(reqApprove);
+                  fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "approve_submitted" }) });
+                }
+
+                const simDeposit = await publicClient.simulateContract({
+                  ...(ajeyVault as any),
+                  functionName: "deposit",
+                  args: [assets, account],
+                  account,
+                } as any);
+                const reqDep: any = simDeposit.request;
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "simulate_deposit_ok", data: { gas: reqDep.gas?.toString?.(), maxFeePerGas: reqDep.maxFeePerGas?.toString?.(), maxPriorityFeePerGas: reqDep.maxPriorityFeePerGas?.toString?.() } }) });
+                let hash: string;
+                try {
+                  hash = await client.writeContract(reqDep);
+                } catch (err: any) {
+                  let reason: string | undefined;
+                  if (err instanceof BaseError) {
+                    const r = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | undefined;
+                    reason = r?.data?.errorName;
+                  }
+                  fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "deposit_write_failed", data: { reason: reason || err?.message } }) });
+                  throw err;
+                }
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "tx_submitted_erc20", data: { hash } }) });
+                alert(`Deposit submitted: ${hash}`);
+              }
+              setAmount("");
+            } catch (e: any) {
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "error", data: { message: e?.message || String(e) } }) });
+              alert(e?.message || String(e));
+            } finally {
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "end" }) });
+              setSubmitting(false);
+            }
+          }}
+          className="rounded-md border px-4 py-2 text-sm"
+        >
+          {submitting ? "Submitting..." : "Deposit"}
+        </button>
       </div>
+
+      {/* Agent reasoning trace — light subtle panel */}
+      <AgentTracePanel />
+    </div>
+  );
+}
+
+async function publicNavigatorReadDecimals(token: `0x${string}`): Promise<number | undefined> {
+  try {
+    // Lazy import to keep module graph lean
+    const { publicClient } = await import("@/lib/chain");
+    const dec = (await publicClient.readContract({ address: token, abi: ERC20_MIN_ABI, functionName: "decimals" })) as number;
+    return dec;
+  } catch {
+    return undefined;
+  }
+}
+
+async function publicNavigatorReadAllowance(token: `0x${string}`, owner: `0x${string}`, spender: `0x${string}`): Promise<bigint> {
+  try {
+    const { publicClient } = await import("@/lib/chain");
+    return (await publicClient.readContract({ address: token, abi: ERC20_MIN_ABI, functionName: "allowance", args: [owner, spender] })) as bigint;
+  } catch {
+    return BigInt(0);
+  }
+}
+
+
+function estimateYieldText(data: VaultSummary | null) {
+  if (!data) return "—";
+  // Simple placeholder: derive pseudo-APR from navPerShare delta vs 1.0
+  const nav = Number(data.navPerShare || 0);
+  if (!isFinite(nav) || nav <= 0) return "—";
+  const apr = Math.max(0, (nav - 1) * 100).toFixed(2);
+  return `${apr}%`;
+}
+
+function AgentTracePanel() {
+  const [items, setItems] = useState<Array<{ id: string; trace?: string[]; details?: string; title: string }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let t: any;
+    async function tick() {
+      try {
+        setLoading((v) => (items.length === 0 ? true : v));
+        const res = await fetch("/api/activity", { cache: "no-store" });
+        const data = await res.json();
+        const withTrace = (data?.items || []).filter((x: any) => x?.type === "allocate" && (x?.trace?.length || x?.details));
+        setItems(withTrace.slice(0, 5));
+      } catch {}
+      finally {
+        setLoading(false);
+        t = setTimeout(tick, 5000);
+      }
+    }
+    tick();
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!items.length && !loading) return null;
+
+  return (
+    <div className="mt-6 rounded-md border bg-white/50 dark:bg-white/5 p-3">
+      <div className="text-xs font-medium text-muted-foreground mb-2">Agent reasoning</div>
+      {loading && <div className="text-xs text-muted-foreground">Thinking…</div>}
+      {!loading && (
+        <div className="space-y-2">
+          {items.map((it) => (
+            <div key={it.id} className="text-xs">
+              <div className="font-medium">{it.title}</div>
+              {it.details && <div className="opacity-80">{it.details}</div>}
+              {Array.isArray(it.trace) && it.trace.length > 0 && (
+                <ul className="mt-1 list-disc pl-4 space-y-1 opacity-80">
+                  {it.trace.map((line, idx) => (
+                    <li key={idx}>{line}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

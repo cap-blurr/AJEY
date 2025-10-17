@@ -5,6 +5,8 @@ export type ActivityItem = {
   timestamp: number;
   title: string;
   details?: string;
+  trace?: string[];
+  usage?: { thoughtsTokenCount?: number; candidatesTokenCount?: number };
 };
 
 const activity: ActivityItem[] = [];

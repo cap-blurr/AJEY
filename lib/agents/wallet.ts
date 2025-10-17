@@ -43,10 +43,17 @@ function readAgentConfigs(): AgentConfig[] {
 }
 
 export function getAgentAccounts() {
-  return readAgentConfigs().map((c) => ({
-    role: c.role,
-    account: privateKeyToAccount(c.privateKey),
-  }));
+  const configs = readAgentConfigs();
+  const accounts = [] as Array<{ role: AgentRole; account: ReturnType<typeof privateKeyToAccount> }>;
+  for (const c of configs) {
+    try {
+      const acct = privateKeyToAccount(c.privateKey);
+      accounts.push({ role: c.role, account: acct });
+    } catch {
+      // skip invalid keys
+    }
+  }
+  return accounts;
 }
 
 export function getAgentAddress(role: AgentRole = "default"): string | undefined {
