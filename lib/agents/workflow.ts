@@ -13,12 +13,29 @@ export async function executeAllocation(plan: {
 
   // AjeyVault ABI indicates agent methods such as supplyToAave(amount)
   // Convert amountAssets (string) to bigint wei for ETH if needed upstream
-  const hash = await client.writeContract({
-    ...ajeyVault,
-    functionName: "supplyToAave",
-    args: [BigInt(plan.amountAssets)],
-    account,
-  } as any);
+  // Logs for observability
+  // eslint-disable-next-line no-console
+  console.log("[workflow] executeAllocation", {
+    vault: ajeyVault.address,
+    amountAssets: plan.amountAssets,
+    targetPool: plan.poolAddress,
+    account: account.address,
+  });
+  let hash: `0x${string}`;
+  try {
+    hash = await client.writeContract({
+      ...ajeyVault,
+      functionName: "supplyToAave",
+      args: [BigInt(plan.amountAssets)],
+      account,
+    } as any);
+  } catch (e: any) {
+    // eslint-disable-next-line no-console
+    console.error("[workflow] writeContract failed", e?.message || e);
+    throw e;
+  }
+  // eslint-disable-next-line no-console
+  console.log("[workflow] executeAllocation submitted", { txHash: hash });
 
   return { txHash: hash };
 }

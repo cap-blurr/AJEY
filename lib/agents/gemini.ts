@@ -135,17 +135,38 @@ export async function generateReasoningPlan(
 ): Promise<GeminiPlanResponse> {
   const ai = getClient();
 
-  const system =
-    "You are a portfolio allocation reasoning agent. Given vault idle funds and a list of preapproved Aave v3 pools on Base Sepolia with current yields, " +
-    "select the single best pool by current yield and prepare a minimal allocation instruction for the workflow agent.";
-
-  const user =
-    `Task: ${request.kind}.\n` +
-    `Input: ${JSON.stringify(request.payload)}\n` +
-    "Return JSON only with fields: rationale, plan { action, amountAssets, poolAddress, poolName }.";
-
+  // Build a strict JSON-only envelope with explicit instructions and inputs
   const model = options?.model || REASONING_MODEL;
-  const prompt = `${system}\n\n${user}`;
+  const instructionsPreset = {
+    version: 1,
+    objective:
+      "Rank Aave reserves for supply-only allocations (no borrowing) and propose ONE target allocation plan.",
+    policy: {
+      filter: { requireActive: true, requireNotFrozen: true, minAvailableUSD: "0" },
+      rank: ["supplyAprPercent desc", "availableUSD desc", "tvlUSD desc"],
+      constraints: [
+        "Only consider supplyAprPercent; ignore borrow-related metrics.",
+        "Require availableUSD > 0 and capacity headroom if capped.",
+        "Proposed amountAssets must be <= vault.idleUnderlying and within supply cap headroom.",
+      ],
+    },
+    outputSpec: {
+      rankingFields: [
+        "asset",
+        "symbol",
+        "supplyAprPercent",
+        "availableUSD",
+        "tvlUSD",
+        "capacityHeadroomUSD",
+      ],
+      planFields: ["action", "amountAssets", "poolAddress", "poolName"],
+    },
+  };
+  const envelope = {
+    instructions: instructionsPreset,
+    inputs: request.payload,
+  };
+  const prompt = JSON.stringify(envelope);
   const config: any = {
     temperature: 0,
     responseMimeType: "application/json",
@@ -153,6 +174,21 @@ export async function generateReasoningPlan(
       type: Type.OBJECT,
       properties: {
         rationale: { type: Type.STRING },
+        ranking: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              asset: { type: Type.STRING },
+              symbol: { type: Type.STRING },
+              supplyAprPercent: { type: Type.NUMBER },
+              availableUSD: { type: Type.STRING },
+              tvlUSD: { type: Type.STRING },
+              capacityHeadroomUSD: { type: Type.STRING },
+            },
+            required: ["asset", "symbol", "supplyAprPercent"],
+          },
+        },
         plan: {
           type: Type.OBJECT,
           properties: {
@@ -165,7 +201,7 @@ export async function generateReasoningPlan(
           required: ["action", "amountAssets", "poolAddress"],
         },
       },
-      propertyOrdering: ["rationale", "plan"],
+      propertyOrdering: ["rationale", "ranking", "plan"],
     },
   };
   if (model.includes("flash")) {

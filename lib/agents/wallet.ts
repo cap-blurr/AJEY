@@ -65,11 +65,14 @@ export function getWalletClient(role: AgentRole = "default") {
   const rpcUrl = env("BASE_RPC_URL") || "https://sepolia.base.org";
   const entry = getAgentAccounts().find((a) => a.role === role) || getAgentAccounts()[0];
   if (!entry) return undefined;
-  return createWalletClient({
+  const client = createWalletClient({
     account: entry.account,
     chain: baseSepolia,
     transport: http(rpcUrl),
   });
+  // eslint-disable-next-line no-console
+  console.log("[wallet] getWalletClient", { role, address: entry.account.address, rpcUrl });
+  return client;
 }
 
 export async function sendNativeTransfer(params: {
@@ -79,11 +82,15 @@ export async function sendNativeTransfer(params: {
 }) {
   const client = getWalletClient(params.role || "default");
   if (!client) throw new Error("No agent wallet configured");
+  // eslint-disable-next-line no-console
+  console.log("[wallet] sendNativeTransfer", { to: params.to, amountEth: params.amountEth, role: params.role || "default" });
   const hash = await client.sendTransaction({
     account: client.account!,
     to: params.to as `0x${string}`,
     value: parseEther(params.amountEth),
   });
+  // eslint-disable-next-line no-console
+  console.log("[wallet] sendNativeTransfer submitted", { txHash: hash });
   return { hash };
 }
 

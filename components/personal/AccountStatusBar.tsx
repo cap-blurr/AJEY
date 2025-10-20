@@ -28,7 +28,7 @@ export default function AccountStatusBar() {
       (async () => {
         try {
           const USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as `0x${string}`;
-          const dec = (await publicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "decimals" })) as number;
+          const dec = (await publicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "decimals", args: [] })) as number;
           const bal = (await publicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "balanceOf", args: [a as `0x${string}`] })) as bigint;
           const denom = Math.pow(10, Number(dec || 6));
           const v = Number(bal) / denom;

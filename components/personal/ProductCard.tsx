@@ -91,7 +91,7 @@ export default function ProductCard() {
           className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
         />
         <button
-          disabled={!amount || submitting}
+          disabled={!amount || submitting || !!data?.paused}
           onClick={async () => {
             if (!ajeyVault) return alert("Vault not configured");
             try {
@@ -229,7 +229,7 @@ export default function ProductCard() {
           }}
           className="rounded-md border px-4 py-2 text-sm"
         >
-          {submitting ? "Submitting..." : "Deposit"}
+          {data?.paused ? "Paused" : submitting ? "Submitting..." : "Deposit"}
         </button>
       </div>
 
