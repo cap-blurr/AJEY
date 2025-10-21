@@ -33,7 +33,7 @@ export default function IndexPage() {
             Sign in to continue
           </h1>
           <p className="max-w-[700px] text-lg sm:text-xl text-accent-foreground text-center">
-            Use Google or Email to create your embedded wallet and start.
+            Use Email to create your embedded wallet and start Earning!
           </p>
           <div className="flex gap-3">
             {!ready ? (
@@ -45,11 +45,11 @@ export default function IndexPage() {
             ) : (
               <Button
                 onClick={() =>
-                  login({ loginMethods: ["email", "google"], walletChainType: "ethereum-only" })
+                  login({ loginMethods: ["email"], walletChainType: "ethereum-only" })
                 }
                 className={cn(buttonVariants())}
               >
-                Continue with Privy
+                Continue with Email
               </Button>
             )}
           </div>

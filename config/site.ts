@@ -1,18 +1,14 @@
 export type SiteConfig = typeof siteConfig
 
 export const siteConfig = {
-  name: "Retro",
+  name: "AJEY",
   description:
-    "Beautifully designed components built with Radix UI and Tailwind CSS.",
+    "Simple Agentic Yields in DeFi for Everyone",
   mainNav: [
     {
       title: "",
       href: "/",
     },
   ],
-  links: {
-    twitter: "https://twitter.com/kathanmehtaa",
-    github: "https://github.com/DarkInventor",
-    docs: "https://easyui.pro",
-  },
+  links: {},
 }
