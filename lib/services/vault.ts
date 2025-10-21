@@ -15,12 +15,17 @@ export type Strategy = {
 
 export type VaultSummary = {
   totalAssetsUSD: number | undefined;
-  totalAssets?: number;
+  totalAssets?: number; // legacy
+  totalAssetsWei?: string; // precise
+  totalAssetsFormatted?: string; // human display (ETH)
   navPerShare: number;
   vTokenSupply: number;
   paused?: boolean;
   ethMode?: boolean;
   strategies: Strategy[];
+  aprMin?: number;
+  aprMax?: number;
+  aprRangeText?: string;
 };
 
 export async function getVaultSummary(): Promise<VaultSummary> {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getVaultSummary, type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError } from "viem";
+import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError, formatEther } from "viem";
 import { baseSepolia } from "viem/chains";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
  
@@ -11,10 +11,13 @@ import { AjeyVaultAbi } from "@/abi/AjeyVault";
 export default function ProductCard() {
   const [data, setData] = useState<VaultSummary | null>(null);
   const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState<string>("");
+  const [amount, setAmount] = useState<string>(""); // deposit amount (ETH)
+  const [withdrawAmount, setWithdrawAmount] = useState<string>(""); // withdraw amount (ETH)
   const [submitting, setSubmitting] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   const { user } = usePrivy();
   const { wallets } = useWallets();
+  const [maxWithdrawEth, setMaxWithdrawEth] = useState<string | null>(null);
 
   const evmProvider = useMemo(() => {
     // Privy embeds wallets; in browser we can access window.ethereum
@@ -26,11 +29,40 @@ export default function ProductCard() {
 
   useEffect(() => {
     let t: any;
-    const load = () => getVaultSummary().then(setData).catch(() => setData(null));
+    let stopped = false;
+    const load = async () => {
+      try {
+        const d = await getVaultSummary();
+        if (!stopped) setData(d);
+      } catch {
+        if (!stopped) setData(null);
+      } finally {
+        // reduce refetch churn; update periodically
+        t = setTimeout(load, 20000);
+      }
+    };
     load();
-    t = setInterval(load, 15000);
-    return () => clearInterval(t);
+    return () => { stopped = true; clearTimeout(t); };
   }, []);
+
+  // Load max withdraw for connected user to guide withdrawals
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMax() {
+      try {
+        const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+        const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+        if (!account || !ajeyVault) { setMaxWithdrawEth(null); return; }
+        const { publicClient } = await import("@/lib/chain");
+        const v = await publicClient.readContract({ ...(ajeyVault as any), functionName: "maxWithdraw", args: [account] }) as bigint;
+        if (!cancelled) setMaxWithdrawEth(formatEther(v));
+      } catch {
+        if (!cancelled) setMaxWithdrawEth(null);
+      }
+    }
+    loadMax();
+    return () => { cancelled = true; };
+  }, [wallets, user]);
 
   return (
     <div className="rounded-xl border p-6 bg-background/60 backdrop-blur">
@@ -46,7 +78,7 @@ export default function ProductCard() {
       <div className="mt-3 grid grid-cols-4 gap-4 text-sm">
         <div>
           <div className="text-muted-foreground">Total Assets</div>
-          <div>{data?.totalAssets ?? "—"}</div>
+          <div>{data?.totalAssetsFormatted ? `${data.totalAssetsFormatted} ETH` : (data?.totalAssetsWei ? `${data.totalAssetsWei} wei` : "—")}</div>
         </div>
         <div>
           <div className="text-muted-foreground">NAV / Share</div>
@@ -58,7 +90,7 @@ export default function ProductCard() {
         </div>
         <div>
           <div className="text-muted-foreground">Est. Yield</div>
-          <div>{estimateYieldText(data)}</div>
+          <div>{data?.aprRangeText || estimateYieldText(data)}</div>
         </div>
       </div>
 
@@ -79,17 +111,46 @@ export default function ProductCard() {
           <div className="mt-3 text-xs text-muted-foreground">
             {data?.paused ? "Vault paused" : "Vault active"}{data?.ethMode ? " · ETH deposits enabled" : ""}
           </div>
+          {maxWithdrawEth && (
+            <div className="mt-2 text-xs">
+              <span className="text-muted-foreground">Max Withdraw: </span>
+              <span>{maxWithdrawEth} ETH</span>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+        <div className="text-xs text-muted-foreground space-y-2">
+          <div>Deposit adds to the vault. Withdraw sends native ETH back to your wallet.</div>
+          <div className="opacity-80">Tip: Use Max to auto-fill.</div>
+        </div>
+        <div className="flex items-center gap-2 justify-end flex-wrap">
         <input
           type="number"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="Amount"
+          placeholder="Deposit (ETH)"
           className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
         />
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+              const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
+              if (!provider) return;
+              const bal = await (provider as any).request?.({ method: "eth_getBalance", params: [primaryWallet?.address, "latest"] });
+              if (!bal) return;
+              const wei = BigInt(bal);
+              // Keep small gas reserve (~0.0002 ETH)
+              const reserve = BigInt(2e14);
+              const usable = wei > reserve ? wei - reserve : BigInt(0);
+              setAmount(formatEther(usable));
+            } catch {}
+          }}
+          className="rounded-md border px-2 py-2 text-xs"
+        >Max</button>
         <button
           disabled={!amount || submitting || !!data?.paused}
           onClick={async () => {
@@ -231,6 +292,110 @@ export default function ProductCard() {
         >
           {data?.paused ? "Paused" : submitting ? "Submitting..." : "Deposit"}
         </button>
+        <input
+          type="number"
+          value={withdrawAmount}
+          onChange={(e) => setWithdrawAmount(e.target.value)}
+          placeholder="Withdraw (ETH)"
+          className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
+        />
+        <button
+          type="button"
+          onClick={() => { if (maxWithdrawEth) setWithdrawAmount(maxWithdrawEth); }}
+          className="rounded-md border px-2 py-2 text-xs"
+        >Max</button>
+        <button
+          disabled={!withdrawAmount || withdrawing || !!data?.paused}
+          onClick={async () => {
+            if (!ajeyVault) return alert("Vault not configured");
+            try {
+              setWithdrawing(true);
+              const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+              const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+              if (!account) throw new Error("No connected address");
+
+              // debug log
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "start", data: { account } }) });
+
+              // Ensure wallet is on Base Sepolia
+              try {
+                if (primaryWallet?.switchChain) {
+                  await primaryWallet.switchChain(baseSepolia.id);
+                }
+              } catch {
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "switchChain_failed" }) });
+                throw new Error("Please switch your wallet network to Base Sepolia");
+              }
+
+              // Resolve asset and decimals and parse amount
+              const asset = await getAssetAddress();
+              const decimals = (await publicNavigatorReadDecimals(asset)) || 18;
+              const assets = parseUnits(withdrawAmount, decimals);
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "resolved_amount", data: { asset, decimals, assets: assets.toString() } }) });
+
+              // Build viem wallet client from embedded wallet provider
+              const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
+              const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
+
+              // Log current chain id from provider
+              try {
+                const cid = await (provider as any)?.request?.({ method: "eth_chainId" });
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "pre_tx_chain", data: { chainId: String(cid) } }) });
+              } catch {}
+
+              // Read guards & limits: paused, ethMode, maxWithdraw
+              const { publicClient } = await import("@/lib/chain");
+              const [paused, ethMode, maxW] = await Promise.all([
+                publicClient.readContract({ ...(ajeyVault as any), functionName: "paused" }) as Promise<boolean>,
+                publicClient.readContract({ ...(ajeyVault as any), functionName: "ethMode" }) as Promise<boolean>,
+                publicClient.readContract({ ...(ajeyVault as any), functionName: "maxWithdraw", args: [account] }) as Promise<bigint>,
+              ]);
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "guards", data: { paused, ethMode, maxWithdraw: maxW.toString() } }) });
+              if (paused) throw new Error("Vault is paused");
+              if (!ethMode) throw new Error("ETH withdrawals are disabled");
+              if (assets > maxW) throw new Error("Amount exceeds max withdraw");
+
+              // Preview required shares
+              const shares = await publicClient.readContract({ ...(ajeyVault as any), functionName: "previewWithdraw", args: [assets] }) as bigint;
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "preview_withdraw_ok", data: { shares: shares.toString() } }) });
+
+              // Simulate withdrawEth then write
+              try {
+                const sim = await publicClient.simulateContract({
+                  ...(ajeyVault as any),
+                  functionName: "withdrawEth",
+                  args: [assets, account, account],
+                  account,
+                } as any);
+                const req: any = sim.request;
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "simulate_withdrawEth_ok", data: { gas: req.gas?.toString?.(), maxFeePerGas: req.maxFeePerGas?.toString?.(), maxPriorityFeePerGas: req.maxPriorityFeePerGas?.toString?.() } }) });
+                const hash = await client.writeContract(req);
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "tx_submitted_withdrawEth", data: { hash } }) });
+                alert(`Withdrawal submitted: ${hash}`);
+              } catch (err: any) {
+                let reason: string | undefined;
+                if (err instanceof BaseError) {
+                  const r = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | undefined;
+                  reason = r?.data?.errorName;
+                }
+                fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "withdraw_write_failed", data: { reason: reason || err?.message } }) });
+                throw err;
+              }
+
+              setWithdrawAmount("");
+            } catch (e: any) {
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "error", data: { message: e?.message || String(e) } }) });
+              alert(e?.message || String(e));
+            } finally {
+              fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "end" }) });
+              setWithdrawing(false);
+            }
+          }}
+          className="rounded-md border px-4 py-2 text-sm"
+        >
+          {data?.paused ? "Paused" : withdrawing ? "Withdrawing..." : "Withdraw"}
+        </button>
+        </div>
       </div>
 
       {/* Agent reasoning trace — light subtle panel */}
@@ -269,54 +434,51 @@ function estimateYieldText(data: VaultSummary | null) {
   return `${apr}%`;
 }
 
-function AgentTracePanel() {
-  const [items, setItems] = useState<Array<{ id: string; trace?: string[]; details?: string; title: string }>>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let t: any;
-    async function tick() {
-      try {
-        setLoading((v) => (items.length === 0 ? true : v));
-        const res = await fetch("/api/activity", { cache: "no-store" });
-        const data = await res.json();
-        const withTrace = (data?.items || []).filter((x: any) => x?.type === "allocate" && (x?.trace?.length || x?.details));
-        setItems(withTrace.slice(0, 5));
-      } catch {}
-      finally {
-        setLoading(false);
-        t = setTimeout(tick, 5000);
+  function AgentTracePanel() {
+    const [queue, setQueue] = useState<Array<{ id: string; text: string }>>([]);
+    const [show, setShow] = useState<{ id: string; text: string } | null>(null);
+    useEffect(() => {
+      let poll: any;
+      let cycle: any;
+      let stopped = false;
+      async function fetchOnce() {
+        try {
+          const res = await fetch("/api/activity", { cache: "no-store" });
+          const data = await res.json();
+          const candidates = (data?.items || [])
+            .filter((x: any) => x?.type === "allocate" && (x?.details))
+            .slice(0, 5)
+            .map((x: any) => ({ id: x.id, text: x.details as string }));
+          if (!stopped) setQueue(candidates);
+        } catch {}
       }
-    }
-    tick();
-    return () => clearTimeout(t);
-  }, []);
+      // light polling every 20s
+      fetchOnce();
+      poll = setInterval(fetchOnce, 20000);
+      // ephemeral display: rotate every 4s
+      const rotate = () => {
+        setShow((prev) => {
+          const currentIdx = prev ? queue.findIndex((q) => q.id === prev.id) : -1;
+          const next = queue[(currentIdx + 1 + queue.length) % (queue.length || 1)];
+          return next || null;
+        });
+      };
+      cycle = setInterval(() => {
+        if (queue.length > 0) rotate();
+      }, 4000);
+      return () => { stopped = true; clearInterval(poll); clearInterval(cycle); };
+    }, [queue.length]);
 
-  if (!items.length && !loading) return null;
-
-  return (
-    <div className="mt-6 rounded-md border bg-white/50 dark:bg-white/5 p-3">
-      <div className="text-xs font-medium text-muted-foreground mb-2">Agent reasoning</div>
-      {loading && <div className="text-xs text-muted-foreground">Thinking…</div>}
-      {!loading && (
-        <div className="space-y-2">
-          {items.map((it) => (
-            <div key={it.id} className="text-xs">
-              <div className="font-medium">{it.title}</div>
-              {it.details && <div className="opacity-80">{it.details}</div>}
-              {Array.isArray(it.trace) && it.trace.length > 0 && (
-                <ul className="mt-1 list-disc pl-4 space-y-1 opacity-80">
-                  {it.trace.map((line, idx) => (
-                    <li key={idx}>{line}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
+    if (!show) return null;
+    return (
+      <div className="mt-6 rounded-md border bg-white/50 dark:bg-white/5 p-3 overflow-hidden">
+        <div className="text-xs font-medium text-muted-foreground mb-2">Agent reasoning</div>
+        <div className="text-xs animate-[slideIn_300ms_ease]">
+          {show.text}
         </div>
-      )}
-    </div>
-  );
-}
+        <style>{`@keyframes slideIn{from{transform:translateY(6px);opacity:.0}to{transform:translateY(0);opacity:1}}`}</style>
+      </div>
+    );
+  }
 
 

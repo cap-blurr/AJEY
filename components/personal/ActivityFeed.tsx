@@ -15,10 +15,20 @@ export default function ActivityFeed() {
   const [items, setItems] = useState<Item[]>([]);
 
   useEffect(() => {
-    const load = () => getActivity().then((d) => setItems(d.items || []));
+    let t: any;
+    let stopped = false;
+    const load = async () => {
+      try {
+        const d = await getActivity();
+        if (!stopped) setItems(d.items || []);
+      } catch {}
+      finally {
+        // backoff to reduce calls
+        t = setTimeout(load, 15000);
+      }
+    };
     load();
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
+    return () => { stopped = true; clearTimeout(t); };
   }, []);
 
   return (

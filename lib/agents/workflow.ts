@@ -3,8 +3,7 @@ import { getWalletClient } from "@/lib/agents/wallet";
 import { ajeyVault } from "@/lib/services/vault";
 
 export async function executeAllocation(plan: {
-  amountAssets: string;
-  poolAddress: `0x${string}`;
+  amountWei: string; // stringified wei amount
 }) {
   if (!ajeyVault) throw new Error("Vault address not configured");
   const client = getWalletClient("default");
@@ -17,16 +16,17 @@ export async function executeAllocation(plan: {
   // eslint-disable-next-line no-console
   console.log("[workflow] executeAllocation", {
     vault: ajeyVault.address,
-    amountAssets: plan.amountAssets,
-    targetPool: plan.poolAddress,
+    amountWei: plan.amountWei,
     account: account.address,
   });
+  // Step 1: simulate (optional in future)
+  // Step 2: write transaction
   let hash: `0x${string}`;
   try {
     hash = await client.writeContract({
       ...ajeyVault,
       functionName: "supplyToAave",
-      args: [BigInt(plan.amountAssets)],
+      args: [BigInt(plan.amountWei)],
       account,
     } as any);
   } catch (e: any) {
