@@ -272,7 +272,6 @@ export default function ProductCard() {
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "simulate_depositEth_ok", data: { gas: req.gas?.toString?.(), maxFeePerGas: req.maxFeePerGas?.toString?.(), maxPriorityFeePerGas: req.maxPriorityFeePerGas?.toString?.(), value: req.value?.toString?.() } }) });
                 const hash = await client.writeContract(req);
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "tx_submitted_eth", data: { hash } }) });
-                alert(`Deposit submitted: ${hash}`);
                 usedEthPath = true;
               } catch (err: any) {
                 let reason: string | undefined;
@@ -344,12 +343,10 @@ export default function ProductCard() {
                   throw err;
                 }
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "tx_submitted_erc20", data: { hash } }) });
-                alert(`Deposit submitted: ${hash}`);
               }
               setAmount("");
             } catch (e: any) {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "error", data: { message: e?.message || String(e) } }) });
-              alert(e?.message || String(e));
             } finally {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "end" }) });
               setSubmitting(false);
@@ -440,7 +437,6 @@ export default function ProductCard() {
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "simulate_withdrawEth_ok", data: { gas: req.gas?.toString?.(), maxFeePerGas: req.maxFeePerGas?.toString?.(), maxPriorityFeePerGas: req.maxPriorityFeePerGas?.toString?.() } }) });
                 const hash = await client.writeContract(req);
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "tx_submitted_withdrawEth", data: { hash } }) });
-                alert(`Withdrawal submitted: ${hash}`);
               } catch (err: any) {
                 let reason: string | undefined;
                 if (err instanceof BaseError) {
@@ -454,7 +450,6 @@ export default function ProductCard() {
               setWithdrawAmount("");
             } catch (e: any) {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "error", data: { message: e?.message || String(e) } }) });
-              alert(e?.message || String(e));
             } finally {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "end" }) });
               setWithdrawing(false);

@@ -46,7 +46,9 @@ export default function ActivityFeed() {
       const onSnapshot = (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
-          const list: Item[] = (data?.items || []) as Item[];
+          const list: Item[] = ((data?.items || []) as Item[])
+            // exclude agent reasoning traces
+            .filter((it) => !["allocate"].includes((it as any)?.type || ""));
           list.sort((a, b) => b.timestamp - a.timestamp);
           if (!stopped) {
             setItems(list);
@@ -62,6 +64,8 @@ export default function ActivityFeed() {
       const onAdd = (e: MessageEvent) => {
         try {
           const it = JSON.parse(e.data) as Item;
+          // exclude agent reasoning
+          if ((it as any)?.type === "allocate") return;
           const key = it?.details || it?.id;
           if (!it || !key) return;
           if (seen.current.has(key)) return;
@@ -163,14 +167,14 @@ export default function ActivityFeed() {
         ) : (
           <div className="w-full items-stretch flex flex-col gap-2">
             <AnimatePresence initial={false}>
-              {items.slice(0, 6).map((it) => (
+              {items.slice(0, 6).map((it, idx) => (
                 <motion.div
                   key={it.id}
                   layout
-                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                  initial={{ opacity: 0, y: 12, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                  transition={{ type: "spring", stiffness: 350, damping: 32 }}
+                  transition={{ type: "spring", stiffness: 420, damping: 40, mass: 0.7, delay: Math.min(idx * 0.02, 0.2) }}
                   className="flex items-center justify-between rounded-md border bg-white/5 px-3 py-2"
                 >
                   <div className="truncate pr-4">
