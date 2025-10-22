@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import AccountStatusBar from "@/components/personal/AccountStatusBar";
 import ProductCard from "@/components/personal/ProductCard";
-import PortfolioPanel from "@/components/personal/PortfolioPanel";
+// import PortfolioPanel from "@/components/personal/PortfolioPanel";
 import ActivityFeed from "@/components/personal/ActivityFeed";
 import PodSwitcher from "@/components/pod/PodSwitcher";
 import PodOverview from "@/components/pod/PodOverview";
@@ -54,13 +54,18 @@ export default function HomePage() {
         {activeTab === "home" ? (
           <div className="mt-6 grid gap-6">
             <AccountStatusBar />
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="md:col-span-2">
-                <h2 className="text-lg font-semibold mb-2">Places to invest</h2>
+            <div className="grid gap-10 md:grid-cols-[640px_0.2fr_360px] items-start justify-center">
+              <div>
+                <h2 className="text-lg font-semibold mb-2">Ajey Vault</h2>
                 <ProductCard />
               </div>
-              <PortfolioPanel />
-              <ActivityFeed />
+              <div className="hidden md:block" />
+              <div>
+                <h2 className="text-lg font-semibold mb-2">Activity</h2>
+                <div className="w-full max-w-[360px]">
+                  <ActivityFeed />
+                </div>
+              </div>
             </div>
           </div>
         ) : (

@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { getVaultSummary, type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError, formatEther } from "viem";
 import { baseSepolia } from "viem/chains";
+import { browserWsPublicClient, browserPublicClient } from "@/lib/chain";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
  
 
 export default function ProductCard() {
   const [data, setData] = useState<VaultSummary | null>(null);
+  const [userShare, setUserShare] = useState<string | null>(null); // ajWETH
+  const [userInvested, setUserInvested] = useState<string | null>(null); // assets from convertToAssets(balanceOf)
+  const [withdrawableNow, setWithdrawableNow] = useState<string | null>(null); // maxWithdraw(user)
+  const [feePct, setFeePct] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<string>(""); // deposit amount (ETH)
   const [withdrawAmount, setWithdrawAmount] = useState<string>(""); // withdraw amount (ETH)
@@ -28,22 +33,81 @@ export default function ProductCard() {
   }, []);
 
   useEffect(() => {
-    let t: any;
     let stopped = false;
-    const load = async () => {
-      try {
-        const d = await getVaultSummary();
-        if (!stopped) setData(d);
-      } catch {
-        if (!stopped) setData(null);
-      } finally {
-        // reduce refetch churn; update periodically
-        t = setTimeout(load, 20000);
-      }
+    let unwatch: any;
+    const pull = async () => {
+      try { const d = await getVaultSummary(); if (!stopped) setData(d); } catch { if (!stopped) setData(null); }
     };
-    load();
-    return () => { stopped = true; clearTimeout(t); };
+    // initial load
+    pull();
+    // live updates: subscribe to vault Deposit/WithdrawnFromAave/SuppliedToAave via WS if available
+    try {
+      if (browserWsPublicClient && ajeyVault) {
+        unwatch = browserWsPublicClient.watchContractEvent({
+          ...(ajeyVault as any),
+          eventName: undefined as any, // subscribe to all and filter
+          onLogs: () => pull(),
+        } as any);
+      } else {
+        const t = setInterval(pull, 20000);
+        unwatch = () => clearInterval(t);
+      }
+    } catch {
+      const t = setInterval(pull, 20000);
+      unwatch = () => clearInterval(t);
+    }
+    return () => { stopped = true; try { if (unwatch) unwatch(); } catch {} };
   }, []);
+
+  // Load user & vault stats: balanceOf(user), convertToAssets(balance), maxWithdraw(user), feeBps, totalAssets handled in summary
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUser() {
+      try {
+        if (!ajeyVault) return;
+        const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+        const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+        const { publicClient } = await import("@/lib/chain");
+        const [shares, feeBps, invested, maxW] = await Promise.all([
+          account ? publicClient.readContract({ ...(ajeyVault as any), functionName: "balanceOf", args: [account] }) as Promise<bigint> : Promise.resolve(BigInt(0)),
+          publicClient.readContract({ ...(ajeyVault as any), functionName: "feeBps" }) as Promise<number>,
+          (async () => {
+            if (!account) return BigInt(0);
+            const s = await publicClient.readContract({ ...(ajeyVault as any), functionName: "balanceOf", args: [account] }) as bigint;
+            return await publicClient.readContract({ ...(ajeyVault as any), functionName: "convertToAssets", args: [s] }) as bigint;
+          })(),
+          account ? publicClient.readContract({ ...(ajeyVault as any), functionName: "maxWithdraw", args: [account] }) as Promise<bigint> : Promise.resolve(BigInt(0)),
+        ]);
+        if (!cancelled) {
+          setUserShare(formatEther(shares));
+          setFeePct((Number(feeBps) / 100).toFixed(2) + "%");
+          setUserInvested(formatEther(invested));
+          setWithdrawableNow(formatEther(maxW));
+        }
+      } catch {
+        if (!cancelled) {
+          setUserShare(null);
+          setFeePct(null);
+          setUserInvested(null);
+          setWithdrawableNow(null);
+        }
+      }
+    }
+    loadUser();
+    // refresh less frequently as these change on actions/events
+    // Prefer block subscription for user updates to reduce eth_call burst
+    let unsubscribe: any;
+    try {
+      if (browserWsPublicClient) {
+        unsubscribe = browserWsPublicClient.watchBlocks({ onBlock: () => loadUser() });
+      } else {
+        const t = setInterval(loadUser, 30000); unsubscribe = () => clearInterval(t);
+      }
+    } catch {
+      const t = setInterval(loadUser, 30000); unsubscribe = () => clearInterval(t);
+    }
+    return () => { cancelled = true; if (unsubscribe) try { unsubscribe(); } catch {} };
+  }, [wallets, user]);
 
   // Load max withdraw for connected user to guide withdrawals
   useEffect(() => {
@@ -65,9 +129,9 @@ export default function ProductCard() {
   }, [wallets, user]);
 
   return (
-    <div className="rounded-xl border p-6 bg-background/60 backdrop-blur">
+    <div className="rounded-xl border p-6 bg-background/60 backdrop-blur w-full max-w-[640px] overflow-hidden">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Ajey Vault</h2>
+        <h2 className="text-xl font-semibold">Invest In AAVE Markets</h2>
         <button
           className="text-sm px-3 py-1 rounded-md border"
           onClick={() => setOpen((v) => !v)}
@@ -75,23 +139,9 @@ export default function ProductCard() {
           {open ? "Hide" : "Details"}
         </button>
       </div>
-      <div className="mt-3 grid grid-cols-4 gap-4 text-sm">
-        <div>
-          <div className="text-muted-foreground">Total Assets</div>
-          <div>{data?.totalAssetsFormatted ? `${data.totalAssetsFormatted} ETH` : (data?.totalAssetsWei ? `${data.totalAssetsWei} wei` : "—")}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">NAV / Share</div>
-          <div>{data?.navPerShare ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">vToken Supply</div>
-          <div>{data?.vTokenSupply ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Est. Yield</div>
-          <div>{data?.aprRangeText || estimateYieldText(data)}</div>
-        </div>
+      <div className="mt-2">
+        <div className="text-3xl font-semibold tracking-tight">{data?.totalAssetsFormatted ? `${Number(data.totalAssetsFormatted).toFixed(4)} ETH` : "—"}</div>
+        <div className="mt-1 text-sm text-muted-foreground">Your ajWETH: {userShare ? `${Number(userShare).toFixed(4)} ajWETH` : "—"}</div>
       </div>
 
       {open && (
@@ -120,22 +170,39 @@ export default function ProductCard() {
         </div>
       )}
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
-        <div className="text-xs text-muted-foreground space-y-2">
-          <div>Deposit adds to the vault. Withdraw sends native ETH back to your wallet.</div>
-          <div className="opacity-80">Tip: Use Max to auto-fill.</div>
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+        <div className="text-xs text-muted-foreground space-y-1 min-w-0">
+          <div className="flex gap-6">
+            <div>
+              <div className="text-muted-foreground">Withdrawable now</div>
+              <div className="font-medium">{withdrawableNow ? `${Number(withdrawableNow).toFixed(4)} ETH` : "—"}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Yield (Aave)</div>
+              <div className="font-medium">{data?.aprRangeText || "—"}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Fee</div>
+              <div className="font-medium">{feePct || "—"}</div>
+            </div>
+          </div>
+          <div className="text-[11px] opacity-80 mt-2">
+            Invested (You): {userInvested ? `${Number(userInvested).toFixed(4)} ETH` : "—"} · Vault TVL: {data?.totalAssetsFormatted ? `${Number(data.totalAssetsFormatted).toFixed(4)} ETH` : "—"}
+          </div>
         </div>
-        <div className="flex items-center gap-2 justify-end flex-wrap">
-        <input
-          type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="Deposit (ETH)"
-          className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
-        />
-        <button
-          type="button"
-          onClick={async () => {
+        {/* Right column: stack actions vertically and allow wrap on small screens */}
+        <div className="flex flex-col gap-4 md:items-end">
+          <div className="flex flex-wrap items-center gap-3 md:justify-end">
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="Deposit (ETH)"
+              className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={async () => {
             try {
               const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
               const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
@@ -148,12 +215,12 @@ export default function ProductCard() {
               const usable = wei > reserve ? wei - reserve : BigInt(0);
               setAmount(formatEther(usable));
             } catch {}
-          }}
-          className="rounded-md border px-2 py-2 text-xs"
-        >Max</button>
-        <button
-          disabled={!amount || submitting || !!data?.paused}
-          onClick={async () => {
+            }}
+              className="rounded-md border px-2 py-2 text-xs"
+            >Max</button>
+            <button
+            disabled={!amount || submitting || !!data?.paused}
+            onClick={async () => {
             if (!ajeyVault) return alert("Vault not configured");
             try {
               setSubmitting(true);
@@ -287,26 +354,28 @@ export default function ProductCard() {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "end" }) });
               setSubmitting(false);
             }
-          }}
-          className="rounded-md border px-4 py-2 text-sm"
-        >
-          {data?.paused ? "Paused" : submitting ? "Submitting..." : "Deposit"}
-        </button>
-        <input
-          type="number"
-          value={withdrawAmount}
-          onChange={(e) => setWithdrawAmount(e.target.value)}
-          placeholder="Withdraw (ETH)"
-          className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
-        />
-        <button
-          type="button"
-          onClick={() => { if (maxWithdrawEth) setWithdrawAmount(maxWithdrawEth); }}
-          className="rounded-md border px-2 py-2 text-xs"
-        >Max</button>
-        <button
-          disabled={!withdrawAmount || withdrawing || !!data?.paused}
-          onClick={async () => {
+            }}
+              className="rounded-md border px-4 py-2 text-sm"
+            >
+              {data?.paused ? "Paused" : submitting ? "Submitting..." : "Deposit"}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 md:justify-end">
+            <input
+              type="number"
+              value={withdrawAmount}
+              onChange={(e) => setWithdrawAmount(e.target.value)}
+              placeholder="Withdraw (ETH)"
+              className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => { if (maxWithdrawEth) setWithdrawAmount(maxWithdrawEth); }}
+              className="rounded-md border px-2 py-2 text-xs"
+            >Max</button>
+            <button
+              disabled={!withdrawAmount || withdrawing || !!data?.paused}
+              onClick={async () => {
             if (!ajeyVault) return alert("Vault not configured");
             try {
               setWithdrawing(true);
@@ -390,11 +459,12 @@ export default function ProductCard() {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "end" }) });
               setWithdrawing(false);
             }
-          }}
-          className="rounded-md border px-4 py-2 text-sm"
-        >
-          {data?.paused ? "Paused" : withdrawing ? "Withdrawing..." : "Withdraw"}
-        </button>
+            }}
+              className="rounded-md border px-4 py-2 text-sm"
+            >
+              {data?.paused ? "Paused" : withdrawing ? "Withdrawing..." : "Withdraw"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -435,48 +505,128 @@ function estimateYieldText(data: VaultSummary | null) {
 }
 
   function AgentTracePanel() {
-    const [queue, setQueue] = useState<Array<{ id: string; text: string }>>([]);
-    const [show, setShow] = useState<{ id: string; text: string } | null>(null);
+    const [current, setCurrent] = useState<{ id: string; lines: string[]; status: string } | null>(null);
+    const [visibleCount, setVisibleCount] = useState(0);
+    const linesRef = (typeof window !== "undefined" ? (window as any).ReactTraceLinesRef : undefined) || { current: [] as string[] };
+    const containerRef = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
       let poll: any;
-      let cycle: any;
+      let ticker: any;
       let stopped = false;
       async function fetchOnce() {
         try {
           const res = await fetch("/api/activity", { cache: "no-store" });
           const data = await res.json();
-          const candidates = (data?.items || [])
-            .filter((x: any) => x?.type === "allocate" && (x?.details))
-            .slice(0, 5)
-            .map((x: any) => ({ id: x.id, text: x.details as string }));
-          if (!stopped) setQueue(candidates);
+          const items = (data?.items || []) as Array<any>;
+          const traced = items.filter((x) => x?.type === "allocate" && Array.isArray(x.trace) && x.trace.length > 0);
+          if (traced.length > 0) {
+            const latest = traced[0];
+            const id = latest.id as string;
+            const lines = (latest.trace as string[]) || [];
+            if (!stopped) {
+              setCurrent((prev) => {
+                const changingId = !prev || prev.id !== id;
+                if (changingId) setVisibleCount(0);
+                linesRef.current = lines;
+                return { id, lines, status: latest.status as string };
+              });
+            }
+          }
         } catch {}
       }
-      // light polling every 20s
       fetchOnce();
-      poll = setInterval(fetchOnce, 20000);
-      // ephemeral display: rotate every 4s
-      const rotate = () => {
-        setShow((prev) => {
-          const currentIdx = prev ? queue.findIndex((q) => q.id === prev.id) : -1;
-          const next = queue[(currentIdx + 1 + queue.length) % (queue.length || 1)];
-          return next || null;
-        });
-      };
-      cycle = setInterval(() => {
-        if (queue.length > 0) rotate();
-      }, 4000);
-      return () => { stopped = true; clearInterval(poll); clearInterval(cycle); };
-    }, [queue.length]);
+      // SSE live updates
+      let es: EventSource | null = null;
+      try {
+        es = new EventSource("/api/activity/stream", { withCredentials: false } as any);
+        // eslint-disable-next-line no-console
+        console.log("[trace] SSE connecting to /api/activity/stream");
+        const onSnapshot = (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            const latest = data?.latestTrace;
+            // eslint-disable-next-line no-console
+            console.log("[trace] snapshot", { items: (data?.items || []).length, hasTrace: !!latest });
+            if (latest && Array.isArray(latest.trace)) {
+              setCurrent({ id: latest.id, lines: latest.trace, status: latest.status });
+              linesRef.current = latest.trace;
+              setVisibleCount((n) => Math.min(n, latest.trace.length));
+            }
+          } catch {}
+        };
+        const onTrace = (e: MessageEvent) => {
+          try {
+            const payload = JSON.parse(e.data);
+            // eslint-disable-next-line no-console
+            console.log("[trace] activity:trace", { id: payload?.id, count: (payload?.lines || []).length });
+            if (payload?.id && Array.isArray(payload.lines)) {
+              setCurrent({ id: payload.id, lines: payload.lines, status: "running" });
+              linesRef.current = payload.lines;
+              setVisibleCount((n) => Math.min(n + 1, payload.lines.length));
+            }
+          } catch {}
+        };
+        const onUpdate = (e: MessageEvent) => {
+          try {
+            const item = JSON.parse(e.data);
+            // eslint-disable-next-line no-console
+            console.log("[trace] activity:update", { id: item?.id, status: item?.status });
+            if (item?.id && item?.status && current?.id === item.id) {
+              setCurrent((prev) => (prev ? { ...prev, status: item.status } : prev));
+            }
+          } catch {}
+        };
+        es.addEventListener("snapshot", onSnapshot as any);
+        es.addEventListener("activity:trace", onTrace as any);
+        es.addEventListener("activity:update", onUpdate as any);
+      } catch {}
+      // progressive reveal as fallback
+      ticker = setInterval(() => {
+        const total = (linesRef.current || []).length;
+        setVisibleCount((n) => (total === 0 ? 0 : Math.min(n + 1, total)));
+      }, 1200);
+      return () => { stopped = true; clearInterval(poll); clearInterval(ticker); };
+    }, []);
 
-    if (!show) return null;
+    // Auto-scroll container to keep latest line in view
+    useEffect(() => {
+      try {
+        const el = containerRef.current;
+        if (!el) return;
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      } catch {}
+    }, [visibleCount, current?.id]);
+
+    // Ephemeral cleanup: hide panel shortly after success
+    useEffect(() => {
+      if (current?.status === "success") {
+        const t = setTimeout(() => {
+          setCurrent(null);
+          setVisibleCount(0);
+          linesRef.current = [];
+        }, 4000);
+        return () => clearTimeout(t);
+      }
+    }, [current?.status]);
+
+    // Filter out noisy lines; show higher-level reasoning only
+    const rawLines = current?.lines || [];
+    const lines = rawLines.filter((t) => !(t.startsWith("Deposit detected") || t.startsWith("Idle balance:")));
+    const count = Math.min(visibleCount, lines.length);
+    if (!current || count === 0) return null;
     return (
       <div className="mt-6 rounded-md border bg-white/50 dark:bg-white/5 p-3 overflow-hidden">
         <div className="text-xs font-medium text-muted-foreground mb-2">Agent reasoning</div>
-        <div className="text-xs animate-[slideIn_300ms_ease]">
-          {show.text}
+        <div ref={containerRef} className="text-xs overflow-y-auto relative" style={{ maxHeight: 240 }}>
+          {lines.slice(0, count).map((t, i) => (
+            <div key={`${current.id}_${i}`} className="animate-[slideUp_450ms_ease] py-1 opacity-100">
+              {t}
+            </div>
+          ))}
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-white/70 dark:from-background/70 to-transparent" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-gradient-to-t from-white/70 dark:from-background/70 to-transparent" />
         </div>
-        <style>{`@keyframes slideIn{from{transform:translateY(6px);opacity:.0}to{transform:translateY(0);opacity:1}}`}</style>
+        <style>{`@keyframes slideUp{from{transform:translateY(8px);opacity:.0}to{transform:translateY(0);opacity:1}}`}</style>
       </div>
     );
   }
