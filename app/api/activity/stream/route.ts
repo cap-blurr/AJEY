@@ -3,8 +3,14 @@ import { startVaultEventWatcher } from "@/lib/services/vault-events";
 import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
+  // Avoid static generation/export trying to execute this endless SSE route
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return new Response("", { status: 204, headers: { "Cache-Control": "no-store" } });
+  }
   try { startVaultEventWatcher(); } catch {}
   // eslint-disable-next-line no-console
   console.log("[sse] client connecting to /api/activity/stream");
