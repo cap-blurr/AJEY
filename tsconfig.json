@@ -25,5 +25,13 @@
     "strictNullChecks": true
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "components/pod/**",
+    "lib/services/pods.ts",
+    "lib/services/pod-events.ts",
+    "app/api/pods/**",
+    "abi/AjeyInvestmentPod.*",
+    "abi/AjeyPodManager.*"
+  ]
 }

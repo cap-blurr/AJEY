@@ -8,12 +8,10 @@ import { usePathname } from "next/navigation"
 
 export function SiteFooter({ className }: React.HTMLAttributes<HTMLElement>) {
   const pathname = usePathname()
-  const showGradient = pathname !== "/"
+  const showGradient = pathname !== "/" // retained for future gating, gradient overlay removed
   return (
     <footer className={cn("relative overflow-hidden", className)}>
-      {showGradient ? (
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[#ff00aaff] via-[#7c3aed66] to-transparent to-90% dark:from-[#ff00aaee] dark:via-[#7c3aed88]" />
-      ) : null}
+      {/* Footer gradient overlay removed to avoid top glow; page uses bottom gradient instead */}
       <div className="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row bottom-0 inset-x-0 rounded-lg">
         <div className="flex flex-col items-center gap-4 px-0 md:flex-row md:gap-2 md:px-0">
           {/* <Icons.logo /> */}

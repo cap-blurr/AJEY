@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { publicClient, formatEth, browserWsPublicClient } from "@/lib/chain";
+import { browserPublicClient, formatEth, browserWsPublicClient } from "@/lib/chain";
 import { ERC20_MIN_ABI } from "@/lib/services/vault";
 
 export default function AccountStatusBar() {
@@ -12,6 +12,7 @@ export default function AccountStatusBar() {
   const [usdc, setUsdc] = useState<string>("—");
   const [chainOk, setChainOk] = useState<boolean>(true);
   const [copied, setCopied] = useState(false);
+  const usdcDecimalsRef = useRef<number | null>(null);
 
   useEffect(() => {
     const a = (user as any)?.wallet?.address || "";
@@ -19,14 +20,18 @@ export default function AccountStatusBar() {
     const refresh = async () => {
       if (!a) { setBalance(`0.0000 ETH`); setUsdc(`0.00 USDC`); return; }
       try {
-        const b = await publicClient.getBalance({ address: a as `0x${string}` });
+        const b = await browserPublicClient.getBalance({ address: a as `0x${string}` });
         const eth = Number(formatEth(b));
         setBalance(`${eth.toFixed(4)} ETH`);
       } catch { setBalance(`0.0000 ETH`); }
       try {
         const USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as `0x${string}`;
-        const dec = (await publicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "decimals", args: [] })) as number;
-        const bal = (await publicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "balanceOf", args: [a as `0x${string}`] })) as bigint;
+        let dec = usdcDecimalsRef.current;
+        if (dec == null) {
+          dec = (await browserPublicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "decimals", args: [] })) as number;
+          usdcDecimalsRef.current = dec;
+        }
+        const bal = (await browserPublicClient.readContract({ address: USDC, abi: ERC20_MIN_ABI as any, functionName: "balanceOf", args: [a as `0x${string}`] })) as bigint;
         const denom = Math.pow(10, Number(dec || 6));
         const v = Number(bal) / denom;
         setUsdc(`${(isFinite(v) ? v : 0).toFixed(2)} USDC`);

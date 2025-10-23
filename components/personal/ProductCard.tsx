@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import { getVaultSummary, type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
+import { type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError, formatEther } from "viem";
 import { baseSepolia } from "viem/chains";
@@ -35,8 +35,65 @@ export default function ProductCard() {
   useEffect(() => {
     let stopped = false;
     let unwatch: any;
+    let lastMarketAt = 0;
     const pull = async () => {
-      try { const d = await getVaultSummary(); if (!stopped) setData(d); } catch { if (!stopped) setData(null); }
+      try {
+        if (!ajeyVault) { if (!stopped) setData(null); return; }
+        // Read summary directly from chain for freshness
+        const [totalAssets, totalSupply, paused, ethMode] = await Promise.all([
+          browserPublicClient.readContract({ ...(ajeyVault as any), functionName: "totalAssets" }) as Promise<bigint>,
+          browserPublicClient.readContract({ ...(ajeyVault as any), functionName: "totalSupply" }) as Promise<bigint>,
+          browserPublicClient.readContract({ ...(ajeyVault as any), functionName: "paused" }) as Promise<boolean>,
+          browserPublicClient.readContract({ ...(ajeyVault as any), functionName: "ethMode" }) as Promise<boolean>,
+        ]);
+        const navPerShare = totalSupply === BigInt(0) ? 0 : Number(totalAssets) / Number(totalSupply);
+        const summary: VaultSummary = {
+          totalAssetsUSD: undefined,
+          totalAssets: Number(totalAssets),
+          totalAssetsWei: totalAssets.toString(),
+          totalAssetsFormatted: formatEther(totalAssets),
+          navPerShare,
+          vTokenSupply: Number(totalSupply),
+          paused,
+          ethMode,
+          strategies: [],
+          aprMin: undefined,
+          aprMax: undefined,
+          aprRangeText: undefined,
+        };
+        if (!stopped) {
+          setData((prev) => {
+            if (!prev) return summary;
+            // Preserve previously computed APR fields so they don't get wiped between market refreshes
+            const preservedApr = {
+              aprMin: prev.aprMin,
+              aprMax: prev.aprMax,
+              aprRangeText: prev.aprRangeText,
+            } as Partial<VaultSummary>;
+            return { ...prev, ...summary, ...preservedApr } as VaultSummary;
+          });
+        }
+
+        // Update APR range occasionally (heavy call) — throttle to ~60s
+        const now = Date.now();
+        if (now - lastMarketAt > 60000) {
+          lastMarketAt = now;
+          try {
+            const mod = await import("@/lib/services/aave-markets");
+            const snap = await mod.fetchAaveSupplySnapshot();
+            const aprs = (snap?.reserves || [])
+              .map((r: any) => (typeof r?.supplyAprPercent === "number" ? r.supplyAprPercent : 0))
+              .filter((x: number) => Number.isFinite(x) && x > 0);
+            if (aprs.length > 0 && !stopped) {
+              const aprMin = Math.min(...aprs);
+              const aprMax = Math.max(...aprs);
+              setData((prev) => prev ? { ...prev, aprMin, aprMax, aprRangeText: `${aprMin}%–${aprMax}%` } : prev);
+            }
+          } catch {}
+        }
+      } catch {
+        if (!stopped) setData(null);
+      }
     };
     // initial load
     pull();
@@ -504,8 +561,13 @@ function estimateYieldText(data: VaultSummary | null) {
     const [visibleCount, setVisibleCount] = useState(0);
     const linesRef = (typeof window !== "undefined" ? (window as any).ReactTraceLinesRef : undefined) || { current: [] as string[] };
     const containerRef = useRef<HTMLDivElement | null>(null);
+    // Track latest trace id across SSE callbacks to avoid stale closures
+    const currentIdRef = useRef<string | null>(null);
+    // Keep a ref to the live EventSource for proper cleanup
+    const esRef = useRef<EventSource | null>(null);
+    // Animate fade-out on completion
+    const [exiting, setExiting] = useState(false);
     useEffect(() => {
-      let poll: any;
       let ticker: any;
       let stopped = false;
       async function fetchOnce() {
@@ -523,6 +585,7 @@ function estimateYieldText(data: VaultSummary | null) {
                 const changingId = !prev || prev.id !== id;
                 if (changingId) setVisibleCount(0);
                 linesRef.current = lines;
+                currentIdRef.current = id;
                 return { id, lines, status: latest.status as string };
               });
             }
@@ -531,9 +594,8 @@ function estimateYieldText(data: VaultSummary | null) {
       }
       fetchOnce();
       // SSE live updates
-      let es: EventSource | null = null;
       try {
-        es = new EventSource("/api/activity/stream", { withCredentials: false } as any);
+        esRef.current = new EventSource("/api/activity/stream", { withCredentials: false } as any);
         // eslint-disable-next-line no-console
         console.log("[trace] SSE connecting to /api/activity/stream");
         const onSnapshot = (e: MessageEvent) => {
@@ -543,6 +605,7 @@ function estimateYieldText(data: VaultSummary | null) {
             // eslint-disable-next-line no-console
             console.log("[trace] snapshot", { items: (data?.items || []).length, hasTrace: !!latest });
             if (latest && Array.isArray(latest.trace)) {
+              currentIdRef.current = latest.id;
               setCurrent({ id: latest.id, lines: latest.trace, status: latest.status });
               linesRef.current = latest.trace;
               setVisibleCount((n) => Math.min(n, latest.trace.length));
@@ -555,6 +618,7 @@ function estimateYieldText(data: VaultSummary | null) {
             // eslint-disable-next-line no-console
             console.log("[trace] activity:trace", { id: payload?.id, count: (payload?.lines || []).length });
             if (payload?.id && Array.isArray(payload.lines)) {
+              currentIdRef.current = payload.id;
               setCurrent({ id: payload.id, lines: payload.lines, status: "running" });
               linesRef.current = payload.lines;
               setVisibleCount((n) => Math.min(n + 1, payload.lines.length));
@@ -566,41 +630,47 @@ function estimateYieldText(data: VaultSummary | null) {
             const item = JSON.parse(e.data);
             // eslint-disable-next-line no-console
             console.log("[trace] activity:update", { id: item?.id, status: item?.status });
-            if (item?.id && item?.status && current?.id === item.id) {
+            if (item?.id && item?.status && currentIdRef.current === item.id) {
               setCurrent((prev) => (prev ? { ...prev, status: item.status } : prev));
             }
           } catch {}
         };
-        es.addEventListener("snapshot", onSnapshot as any);
-        es.addEventListener("activity:trace", onTrace as any);
-        es.addEventListener("activity:update", onUpdate as any);
+        esRef.current.addEventListener("snapshot", onSnapshot as any);
+        esRef.current.addEventListener("activity:trace", onTrace as any);
+        esRef.current.addEventListener("activity:update", onUpdate as any);
       } catch {}
       // progressive reveal as fallback
       ticker = setInterval(() => {
         const total = (linesRef.current || []).length;
         setVisibleCount((n) => (total === 0 ? 0 : Math.min(n + 1, total)));
       }, 1200);
-      return () => { stopped = true; clearInterval(poll); clearInterval(ticker); };
+      return () => {
+        stopped = true;
+        try { if (esRef.current) esRef.current.close(); } catch {}
+        esRef.current = null;
+        clearInterval(ticker);
+      };
     }, []);
 
-    // Auto-scroll container to keep latest line in view
+    // Keep newest line focused visually by anchoring to bottom via CSS (no imperative scroll)
     useEffect(() => {
-      try {
-        const el = containerRef.current;
-        if (!el) return;
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-      } catch {}
+      // Intentionally left empty to avoid janky scrollbars/animations.
     }, [visibleCount, current?.id]);
 
-    // Ephemeral cleanup: hide panel shortly after success
+    // Ephemeral cleanup: keep for ~10s, then fade out smoothly
     useEffect(() => {
       if (current?.status === "success") {
-        const t = setTimeout(() => {
+        setExiting(false);
+        const fadeAt = 9000; // start fading ~1s before removal
+        const removeAt = 10000; // remove after 10s total
+        const t1 = setTimeout(() => setExiting(true), fadeAt);
+        const t2 = setTimeout(() => {
           setCurrent(null);
           setVisibleCount(0);
           linesRef.current = [];
-        }, 4000);
-        return () => clearTimeout(t);
+          setExiting(false);
+        }, removeAt);
+        return () => { clearTimeout(t1); clearTimeout(t2); };
       }
     }, [current?.status]);
 
@@ -609,19 +679,26 @@ function estimateYieldText(data: VaultSummary | null) {
     const lines = rawLines.filter((t) => !(t.startsWith("Deposit detected") || t.startsWith("Idle balance:")));
     const count = Math.min(visibleCount, lines.length);
     if (!current || count === 0) return null;
+    const maxVisible = 8;
+    const start = Math.max(0, count - maxVisible);
+    const display = lines.slice(start, count);
     return (
-      <div className="mt-6 rounded-md border bg-white/50 dark:bg-white/5 p-3 overflow-hidden">
+      <div className="mt-6 rounded-md border bg-white/50 dark:bg-white/5 p-3 overflow-hidden" style={{ opacity: exiting ? 0 : 1, transition: "opacity 800ms ease-out" }}>
         <div className="text-xs font-medium text-muted-foreground mb-2">Agent reasoning</div>
-        <div ref={containerRef} className="text-xs overflow-y-auto relative" style={{ maxHeight: 240 }}>
-          {lines.slice(0, count).map((t, i) => (
-            <div key={`${current.id}_${i}`} className="animate-[slideUp_450ms_ease] py-1 opacity-100">
-              {t}
-            </div>
-          ))}
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-white/70 dark:from-background/70 to-transparent" />
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-gradient-to-t from-white/70 dark:from-background/70 to-transparent" />
+        <div ref={containerRef} className="text-xs relative overflow-hidden flex flex-col justify-end" style={{ minHeight: 56, maxHeight: 200 }}>
+          {display.map((t, i) => {
+            const age = display.length - 1 - i; // 0 = newest
+            const isNewest = age === 0;
+            const opacity = Math.max(0.35, 1 - age * 0.14);
+            return (
+              <div key={`${current.id}_${start + i}`} className={`${isNewest ? "text-foreground" : "text-muted-foreground"}`} style={{ opacity, transition: "opacity 420ms ease, transform 420ms ease" }}>
+                <span className={"inline-block animate-[slideUpFade_450ms_ease] " + (isNewest ? "animate-[pulseHighlight_1200ms_ease-out]" : "")}>{t}</span>
+              </div>
+            );
+          })}
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-white/70 dark:from-background/70 to-transparent" />
         </div>
-        <style>{`@keyframes slideUp{from{transform:translateY(8px);opacity:.0}to{transform:translateY(0);opacity:1}}`}</style>
+        <style>{`@keyframes slideUpFade{from{transform:translateY(8px);opacity:.0;filter:blur(1px)}to{transform:translateY(0);opacity:1;filter:blur(0)}}@keyframes pulseHighlight{0%{background:rgba(255,255,255,.16)}100%{background:transparent}}`}</style>
       </div>
     );
   }

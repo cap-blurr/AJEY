@@ -35,3 +35,12 @@ yarn-error.log*
 
 .contentlayer
 .env
+
+components/pod/
+lib/services/pods.ts
+lib/services/pod-events.ts
+app/api/pods/
+abi/AjeyInvestmentPod.ts
+abi/AjeyPodManager.ts
+abi/AjeyPodManager.json
+abi/AjeyInvestmentPod.json

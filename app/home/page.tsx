@@ -8,16 +8,20 @@ import AccountStatusBar from "@/components/personal/AccountStatusBar";
 import ProductCard from "@/components/personal/ProductCard";
 // import PortfolioPanel from "@/components/personal/PortfolioPanel";
 import ActivityFeed from "@/components/personal/ActivityFeed";
-import PodSwitcher from "@/components/pod/PodSwitcher";
-import PodOverview from "@/components/pod/PodOverview";
-import PodDepositCard from "@/components/pod/PodDepositCard";
-import PodWithdrawCard from "@/components/pod/PodWithdrawCard";
-import PodActivityFeed from "@/components/pod/PodActivityFeed";
+// import PodSwitcher from "@/components/pod/PodSwitcher";
+// import PodOverview from "@/components/pod/PodOverview";
+// import PodActivityFeed from "@/components/pod/PodActivityFeed";
+// import PodMembership from "@/components/pod/PodMembership";
+// import PodProposals from "@/components/pod/PodProposals";
+// import PodInvesting from "@/components/pod/PodInvesting";
+// import PodAutoPull from "@/components/pod/PodAutoPull";
+// import PodWithdrawals from "@/components/pod/PodWithdrawals";
 
 export default function HomePage() {
   const { ready, authenticated, user } = usePrivy();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"home" | "pod">("home");
+  // const [activeTab, setActiveTab] = useState<"home" | "pod">("home");
+  // const [activePod, setActivePod] = useState<`0x${string}` | undefined>(undefined);
 
   useEffect(() => {
     if (ready && !authenticated) {
@@ -36,47 +40,24 @@ export default function HomePage() {
           <p className="text-sm text-white">Welcome{user?.wallet?.address ? `, ${user.wallet.address}` : ""}.</p>
         </div>
 
-        <div className="mt-6 flex gap-2">
-          <button
-            className={`rounded-md px-4 py-2 text-sm font-medium ${activeTab === "home" ? "bg-white/10 border border-white/20" : "bg-white/5 border border-transparent"}`}
-            onClick={() => setActiveTab("home")}
-          >
-            Home
-          </button>
-          <button
-            className={`rounded-md px-4 py-2 text-sm font-medium ${activeTab === "pod" ? "bg-white/10 border border-white/20" : "bg-white/5 border border-transparent"}`}
-            onClick={() => setActiveTab("pod")}
-          >
-            Pod
-          </button>
-        </div>
+        {/* Pods UI temporarily disabled for hackathon */}
 
-        {activeTab === "home" ? (
-          <div className="mt-6 grid gap-6">
-            <AccountStatusBar />
-            <div className="grid gap-10 md:grid-cols-[640px_0.2fr_360px] items-start justify-center">
-              <div>
-                <h2 className="text-lg font-semibold mb-2">Ajey Vault</h2>
-                <ProductCard />
-              </div>
-              <div className="hidden md:block" />
-              <div>
-                <h2 className="text-lg font-semibold mb-2">Activity</h2>
-                <div className="w-full max-w-[360px]">
-                  <ActivityFeed />
-                </div>
+        <div className="mt-6 grid gap-6">
+          <AccountStatusBar />
+          <div className="grid gap-10 md:grid-cols-[640px_0.2fr_360px] items-start justify-center">
+            <div>
+              <h2 className="text-lg font-semibold mb-2">Ajey Vault</h2>
+              <ProductCard />
+            </div>
+            <div className="hidden md:block" />
+            <div>
+              <h2 className="text-lg font-semibold mb-2">Activity</h2>
+              <div className="w-full max-w-[360px]">
+                <ActivityFeed />
               </div>
             </div>
           </div>
-        ) : (
-          <div className="mt-6 grid gap-6 md:grid-cols-2">
-            <PodSwitcher />
-            <PodOverview />
-            <PodDepositCard />
-            <PodWithdrawCard />
-            <PodActivityFeed />
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
