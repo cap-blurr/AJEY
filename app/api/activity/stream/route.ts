@@ -1,4 +1,4 @@
-import { listActivity, getActivityEmitter, latestTrace } from "@/lib/activity";
+import { listActivity, getActivityEmitter, latestTrace, hydrateActivityStore } from "@/lib/activity";
 import { startVaultEventWatcher } from "@/lib/services/vault-events";
 import { NextRequest } from "next/server";
 
@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
   try { startVaultEventWatcher(); } catch {}
   // eslint-disable-next-line no-console
   console.log("[sse] client connecting to /api/activity/stream");
+  try { await hydrateActivityStore(); } catch {}
   const encoder = new TextEncoder();
   const abortSignal = req.signal;
   let closed = false;

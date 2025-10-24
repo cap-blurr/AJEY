@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startVaultEventWatcher } from "@/lib/services/vault-events";
+import { hydrateActivityStore } from "@/lib/activity";
 
 export async function POST(req: NextRequest) {
   try {
     // Ensure event watcher is started on any debug hit (deposit flow uses this endpoint)
     startVaultEventWatcher();
+    try { await hydrateActivityStore(); } catch {}
     const body = await req.json().catch(() => ({}));
     const scope = body?.scope || "app";
     const step = body?.step || "unknown";

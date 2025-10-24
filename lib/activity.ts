@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { getRedis } from "@/lib/redis";
 export type ActivityItem = {
   id: string;
   type: string;
@@ -74,6 +75,97 @@ export function latestTrace(): ActivityItem | undefined {
 
 export function getActivityEmitter(): EventEmitter {
   return emitter;
+}
+
+// ------------------ Redis persistence layer ------------------
+
+const IDS_KEY = "activity:ids";
+const MAX_ITEMS = 200;
+let hydrated = false;
+
+function upsertInMemory(item: ActivityItem) {
+  const idx = store.items.findIndex((a) => a.id === item.id);
+  if (idx === -1) store.items.unshift(item);
+  else store.items[idx] = { ...store.items[idx], ...item };
+  // cap
+  if (store.items.length > MAX_ITEMS) store.items.length = MAX_ITEMS;
+}
+
+async function redisSetItem(item: ActivityItem) {
+  const r = await getRedis();
+  if (!r) return;
+  await r.set(`activity:item:${item.id}`, JSON.stringify(item));
+}
+
+async function redisAddId(id: string) {
+  const r = await getRedis();
+  if (!r) return;
+  // remove existing occurrences then add to head
+  try { await r.lRem(IDS_KEY, 0, id); } catch {}
+  await r.lPush(IDS_KEY, id);
+  await r.lTrim(IDS_KEY, 0, MAX_ITEMS - 1);
+}
+
+async function redisGetItems(): Promise<ActivityItem[]> {
+  const r = await getRedis();
+  if (!r) return [];
+  const ids = (await r.lRange(IDS_KEY, 0, MAX_ITEMS - 1)) as string[];
+  if (!ids || ids.length === 0) return [];
+  const keys = ids.map((id: string) => `activity:item:${id}`);
+  const vals = (await r.mGet(keys)) as (string | null)[];
+  const items: ActivityItem[] = [];
+  for (const v of vals) {
+    if (!v) continue;
+    try { items.push(JSON.parse(v as string)); } catch {}
+  }
+  // ensure newest first by timestamp
+  items.sort((a, b) => b.timestamp - a.timestamp);
+  return items;
+}
+
+export async function hydrateActivityStore() {
+  if (hydrated) return;
+  try {
+    const items = await redisGetItems();
+    if (items.length > 0) {
+      const seen = new Set<string>();
+      const merged: ActivityItem[] = [];
+      for (const it of [...items, ...store.items]) {
+        if (seen.has(it.id)) continue;
+        seen.add(it.id);
+        merged.push(it);
+      }
+      store.items = merged.sort((a, b) => b.timestamp - a.timestamp).slice(0, MAX_ITEMS);
+    }
+  } catch {}
+  hydrated = true;
+}
+
+// Wrap mutators to also persist
+const _origAdd = addActivity;
+export function addActivityPersisted(item: ActivityItem) {
+  _origAdd(item);
+  upsertInMemory(item);
+  redisSetItem(item).catch(() => {});
+  redisAddId(item.id).catch(() => {});
+}
+
+const _origAppend = appendActivityTrace;
+export function appendActivityTracePersisted(id: string, line: string) {
+  _origAppend(id, line);
+  try {
+    const idx = store.items.findIndex((a) => a.id === id);
+    if (idx !== -1) redisSetItem(store.items[idx]).catch(() => {});
+  } catch {}
+}
+
+const _origUpdate = updateActivity;
+export function updateActivityPersisted(id: string, patch: Partial<ActivityItem>) {
+  _origUpdate(id, patch);
+  try {
+    const idx = store.items.findIndex((a) => a.id === id);
+    if (idx !== -1) redisSetItem(store.items[idx]).catch(() => {});
+  } catch {}
 }
 
 

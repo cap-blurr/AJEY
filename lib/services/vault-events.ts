@@ -1,6 +1,6 @@
 import { publicClient, wsPublicClient, formatEth } from "@/lib/chain";
 import { ajeyVault, readIdleUnderlying, rebasingWrapper } from "@/lib/services/vault";
-import { addActivity, appendActivityTrace, updateActivity } from "@/lib/activity";
+import { addActivityPersisted as addActivity, appendActivityTracePersisted as appendActivityTrace, updateActivityPersisted as updateActivity } from "@/lib/activity";
 import { fetchPoolYields } from "@/lib/services/aave";
 import { executeAllocation } from "@/lib/agents/workflow";
 import { generateReasoningPlan } from "@/lib/agents/gemini";
@@ -69,7 +69,8 @@ export function startVaultEventWatcher() {
         // Record user deposit activity for UI
         try {
           if (assets) {
-            addActivity({ id: `dep_${Date.now()}`, type: "user_deposit", status: "success", timestamp: Date.now(), title: `Deposit ${formatEth(assets)} ETH`, details: txHash || "" });
+            const id = txHash ? `dep_${txHash}` : `dep_${Date.now()}`;
+            addActivity({ id, type: "user_deposit", status: "success", timestamp: Date.now(), title: `Deposit ${formatEth(assets)} ETH`, details: txHash || "" });
           }
         } catch {}
         // Create a fresh reasoning trace for this deposit cycle
@@ -129,20 +130,20 @@ export function startVaultEventWatcher() {
           return;
         }
         console.log("[agent] exec plan", target);
+        // Final preflight: ensure there is still idle before we announce execution
+        const idleNow = await readIdleUnderlying();
+        if (idleNow <= BigInt(0)) {
+          appendActivityTrace(myTraceId, "Idle balance is 0; not allocating.");
+          return;
+        }
         // eslint-disable-next-line no-console
         console.log("[trace] line", { id: currentTraceId, line: `Execute allocation: amountWei=${String(target?.amountWei || idle)}` });
         if (myTraceId) appendActivityTrace(myTraceId, `Execute allocation: amountWei=${String(target?.amountWei || idle)}`);
         if (!target?.amountWei) { console.log("[agent] no target amountWei selected"); return; }
 
-        // 4) Execute via workflow agent (single in-flight) — ensure we still own idle funds
+        // 4) Execute via workflow agent (single in-flight)
         allocating = true;
         try {
-          // Re-check idle just before execution to avoid racing previous supplies
-          const idleNow = await readIdleUnderlying();
-          if (idleNow <= BigInt(0)) {
-            appendActivityTrace(myTraceId, "Idle balance is 0; skipping allocation.");
-            return;
-          }
           const { txHash } = await executeAllocation({ amountWei: String(target.amountWei || idle) });
           // eslint-disable-next-line no-console
           console.log("[agent] allocation submitted", { txHash });
@@ -223,7 +224,8 @@ export function startVaultEventWatcher() {
         const last: any = logs[logs.length - 1];
         const assets = last?.args?.assets as bigint | undefined;
         const txHash = last?.transactionHash as string | undefined;
-        addActivity({ id: `wd_${Date.now()}`, type: "user_withdraw", status: "success", timestamp: Date.now(), title: `Withdraw ${assets ? formatEth(assets) : "?"} ETH`, details: txHash || "" });
+        const id = txHash ? `wd_${txHash}` : `wd_${Date.now()}`;
+        addActivity({ id, type: "user_withdraw", status: "success", timestamp: Date.now(), title: `Withdraw ${assets ? formatEth(assets) : "?"} ETH`, details: txHash || "" });
       } catch {}
     },
   });
