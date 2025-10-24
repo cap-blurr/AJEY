@@ -5,6 +5,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { browserPublicClient, formatEth, browserWsPublicClient } from "@/lib/chain";
 import { ERC20_MIN_ABI } from "@/lib/services/vault";
 import { useBasename } from "@/lib/basename";
+import { base, baseSepolia } from "viem/chains";
 
 export default function AccountStatusBar() {
   const { user } = usePrivy();
@@ -12,6 +13,7 @@ export default function AccountStatusBar() {
   const [balance, setBalance] = useState<string>("—");
   const [usdc, setUsdc] = useState<string>("—");
   const [chainOk, setChainOk] = useState<boolean>(true);
+  const [networkName, setNetworkName] = useState<string>("Base Sepolia");
   const [copied, setCopied] = useState(false);
   const usdcDecimalsRef = useRef<number | null>(null);
 
@@ -42,8 +44,16 @@ export default function AccountStatusBar() {
       if (typeof window !== "undefined" && (window as any).ethereum?.request) {
         (window as any).ethereum
           .request({ method: "eth_chainId" })
-          .then((cid: string) => setChainOk(cid?.toLowerCase() === "0x14a34"))
-          .catch(() => setChainOk(true));
+          .then((cid: string) => {
+            const hex = (cid || "").toLowerCase();
+            const sep = `0x${baseSepolia.id.toString(16)}`.toLowerCase();
+            const main = `0x${base.id.toString(16)}`.toLowerCase();
+            if (hex === sep) { setChainOk(true); setNetworkName("Base Sepolia"); return; }
+            if (hex === main) { setChainOk(true); setNetworkName("Base"); return; }
+            setChainOk(false);
+            setNetworkName("Wrong network");
+          })
+          .catch(() => { setChainOk(true); setNetworkName("Base Sepolia"); });
       }
     };
     refresh();
@@ -62,7 +72,7 @@ export default function AccountStatusBar() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="text-xs text-muted-foreground">Network</div>
-          <div className={`text-xs ${chainOk ? "" : "text-red-400"}`}>{chainOk ? "Base Sepolia" : "Wrong network"}</div>
+          <div className={`text-xs ${chainOk ? "" : "text-red-400"}`}>{networkName}</div>
         </div>
         <div className="flex items-center gap-3 min-w-0">
           <div className="text-xs text-muted-foreground">Balance</div>
