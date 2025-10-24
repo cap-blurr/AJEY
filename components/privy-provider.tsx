@@ -15,7 +15,7 @@ export function PrivyProviderWrapper({ children }: PrivyProviderWrapperProps) {
     <PrivyProvider
       appId={appId ?? ""}
       config={{
-        loginMethods: ["email", "google"],
+        loginMethods: ["email", "wallet", "google"],
         // Pre-generate an embedded EVM wallet for users who log in without an external wallet
         embeddedWallets: {
           ethereum: {
@@ -28,6 +28,10 @@ export function PrivyProviderWrapper({ children }: PrivyProviderWrapperProps) {
         appearance: {
           // Use a brand-accent color close to the site's primary
           accentColor: "#6366F1", // Tailwind indigo-500
+          // Show Base Account as a wallet option in the modal
+          walletList: ["base_account"],
+          // Keep email first; wallets still available in the modal
+          showWalletLoginFirst: false,
         },
       }}
     >

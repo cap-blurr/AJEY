@@ -18,6 +18,7 @@ type Item = {
 export default function ActivityFeed() {
   const [items, setItems] = useState<Item[]>([]);
   const seen = useRef<Set<string>>(new Set());
+ 
 
   useEffect(() => {
     let t: any;
@@ -159,7 +160,11 @@ export default function ActivityFeed() {
   }, []);
 
   return (
-    <div className="rounded-xl border p-6 bg-background/60 backdrop-blur">
+    <div className="relative rounded-2xl border border-white/20 p-6 bg-black/10 dark:bg-black/50 backdrop-blur-xl shadow-[0_0_1px_rgba(255,255,255,0.25),0_10px_40px_-10px_rgba(124,58,237,0.35)]">
+      {/* liquid glass overlays */}
+      <div className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-white/10" />
+      <div className="pointer-events-none absolute inset-0 rounded-2xl bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(255,255,255,0.24),transparent_60%)] opacity-30" />
+      <div className="pointer-events-none absolute -inset-x-20 -top-1/2 h-[220%] bg-[linear-gradient(120deg,rgba(255,255,255,0)_35%,rgba(255,255,255,0.18),rgba(255,255,255,0)_65%)] opacity-40 animate-[sheenSweep_9s_linear_infinite]" />
       <h2 className="text-xl font-semibold">Activity</h2>
       <div className="mt-3 text-sm">
         {items.length === 0 ? (
@@ -196,6 +201,7 @@ export default function ActivityFeed() {
           </div>
         )}
       </div>
+      <style>{`@keyframes sheenSweep{0%{transform:translateX(-55%)}100%{transform:translateX(55%)}}`}</style>
     </div>
   );
 }

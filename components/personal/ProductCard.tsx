@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets, useBaseAccountSdk } from "@privy-io/react-auth";
 import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError, formatEther } from "viem";
 import { baseSepolia } from "viem/chains";
 import { browserWsPublicClient, browserPublicClient } from "@/lib/chain";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
+import { simulateApproveReallocatorMax, readShareAllowance } from "@/lib/services/reallocator";
  
 
 export default function ProductCard() {
@@ -20,9 +21,12 @@ export default function ProductCard() {
   const [withdrawAmount, setWithdrawAmount] = useState<string>(""); // withdraw amount (ETH)
   const [submitting, setSubmitting] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [needReallocApproval, setNeedReallocApproval] = useState<boolean | null>(null);
+  const [enablingRealloc, setEnablingRealloc] = useState(false);
   const { user } = usePrivy();
   const { wallets } = useWallets();
-  const [maxWithdrawEth, setMaxWithdrawEth] = useState<string | null>(null);
+  const reallocPromptedRef = useRef(false);
+  // Max withdraw is derived from live withdrawableNow; avoid separate stale state
 
   const evmProvider = useMemo(() => {
     // Privy embeds wallets; in browser we can access window.ethereum
@@ -31,6 +35,36 @@ export default function ProductCard() {
     }
     return null;
   }, []);
+
+  const { baseAccountSdk } = useBaseAccountSdk();
+
+  async function getBaseProviderIfConnected(): Promise<{ provider: any; address: `0x${string}` } | null> {
+    try {
+      const provider = baseAccountSdk?.getProvider?.();
+      if (!provider) return null;
+      const addresses = await provider.request({ method: "eth_accounts" });
+      const addr = Array.isArray(addresses) && addresses[0];
+      if (!addr) return null;
+      return { provider, address: addr as `0x${string}` };
+    } catch {
+      return null;
+    }
+  }
+
+  async function getActiveSigner(): Promise<{ provider: any; address: `0x${string}` | undefined }> {
+    const base = await getBaseProviderIfConnected();
+    if (base) return base;
+    const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+    const addr = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+    const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
+    return { provider, address: addr };
+  }
+
+  async function ensureBaseChain(provider: any) {
+    try {
+      await provider?.request?.({ method: "wallet_switchEthereumChain", params: [{ chainId: toHex(baseSepolia.id) }] });
+    } catch {}
+  }
 
   useEffect(() => {
     let stopped = false;
@@ -166,27 +200,84 @@ export default function ProductCard() {
     return () => { cancelled = true; if (unsubscribe) try { unsubscribe(); } catch {} };
   }, [wallets, user]);
 
-  // Load max withdraw for connected user to guide withdrawals
+  // Check whether AgentReallocator approval is already granted
   useEffect(() => {
     let cancelled = false;
-    async function loadMax() {
+    (async () => {
       try {
+        if (!ajeyVault) return;
+        const base = await getBaseProviderIfConnected();
         const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
-        const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
-        if (!account || !ajeyVault) { setMaxWithdrawEth(null); return; }
-        const { publicClient } = await import("@/lib/chain");
-        const v = await publicClient.readContract({ ...(ajeyVault as any), functionName: "maxWithdraw", args: [account] }) as bigint;
-        if (!cancelled) setMaxWithdrawEth(formatEther(v));
+        const owner = (base?.address as `0x${string}` | undefined) || (primaryWallet?.address as `0x${string}` | undefined) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+        if (!owner) { if (!cancelled) setNeedReallocApproval(null); return; }
+        const allowance = await readShareAllowance(owner, browserPublicClient as any);
+        const { maxUint256 } = await import("viem");
+        const need = allowance !== maxUint256;
+        if (!cancelled) setNeedReallocApproval(need);
       } catch {
-        if (!cancelled) setMaxWithdrawEth(null);
+        if (!cancelled) setNeedReallocApproval(null);
       }
-    }
-    loadMax();
+    })();
     return () => { cancelled = true; };
   }, [wallets, user]);
 
+  // After supply to Aave, prompt user to approve AgentReallocator (one-time per session)
+  useEffect(() => {
+    let unwatchSupplied: any;
+    let stopped = false;
+    (async () => {
+      try {
+        const client: any = browserWsPublicClient || browserPublicClient;
+        if (!client || !ajeyVault) return;
+        const usePolling = !browserWsPublicClient;
+        unwatchSupplied = client.watchContractEvent({
+          ...(ajeyVault as any),
+          abi: AjeyVaultAbi as any,
+          eventName: "SuppliedToAave",
+          poll: usePolling as any,
+          pollingInterval: 15000 as any,
+          onLogs: async (logs: any[]) => {
+            if (stopped) return;
+            if (reallocPromptedRef.current) return;
+            try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "reallocator", step: "supplied_event", data: { count: logs?.length } }) }); } catch {}
+            try {
+              const base = await getBaseProviderIfConnected();
+              const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+              const owner = (base?.address as `0x${string}` | undefined) || (primaryWallet?.address as `0x${string}` | undefined) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+              if (!owner) return;
+              try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "reallocator", step: "owner_resolved", data: { owner } }) }); } catch {}
+              const res: any = await simulateApproveReallocatorMax(owner, { client: browserPublicClient });
+              if (res?.alreadyMax) { reallocPromptedRef.current = true; return; }
+              try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "reallocator", step: "will_prompt" }) }); } catch {}
+              const ok = typeof window !== "undefined" ? window.confirm("Enable reallocation by approving AgentReallocator to spend your vault shares?") : false;
+              if (!ok) return;
+              const { provider } = await getActiveSigner();
+              await ensureBaseChain(provider);
+              if (!provider) return;
+              const clientW = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
+              const txHash = await clientW.writeContract(res.request);
+              try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "reallocator", step: "approval_submitted", data: { txHash } }) }); } catch {}
+              reallocPromptedRef.current = true;
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.error("[reallocator] approval flow failed", (e as any)?.message || e);
+              try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "reallocator", step: "error", data: { message: (e as any)?.message || String(e) } }) }); } catch {}
+            }
+          },
+        } as any);
+      } catch {}
+    })();
+    return () => { stopped = true; try { if (unwatchSupplied) unwatchSupplied(); } catch {} };
+  }, [wallets, user, evmProvider]);
+
+  // Note: we intentionally rely on withdrawableNow (live, block-updating) instead of a separate max state
+
   return (
-    <div className="rounded-xl border p-6 bg-background/60 backdrop-blur w-full max-w-[640px] overflow-hidden">
+    <div className="relative rounded-2xl border border-white/20 p-6 bg-black/10 dark:bg-black/50 backdrop-blur-xl w-full max-w-[640px] overflow-hidden shadow-[0_0_1px_rgba(255,255,255,0.25),0_10px_40px_-10px_rgba(124,58,237,0.35)]">
+      {/* liquid glass overlays */}
+      <div className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-white/10" />
+      <div className="pointer-events-none absolute inset-0 rounded-2xl bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(255,255,255,0.24),transparent_60%)] opacity-30" />
+      <div className="pointer-events-none absolute -inset-x-20 -top-1/2 h-[220%] bg-[linear-gradient(120deg,rgba(255,255,255,0)_35%,rgba(255,255,255,0.18),rgba(255,255,255,0)_65%)] opacity-40 animate-[sheenSweep_9s_linear_infinite]" />
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Invest In AAVE Markets</h2>
         <button
@@ -218,10 +309,40 @@ export default function ProductCard() {
           <div className="mt-3 text-xs text-muted-foreground">
             {data?.paused ? "Vault paused" : "Vault active"}{data?.ethMode ? " · ETH deposits enabled" : ""}
           </div>
-          {maxWithdrawEth && (
+          {withdrawableNow && (
             <div className="mt-2 text-xs">
               <span className="text-muted-foreground">Max Withdraw: </span>
-              <span>{maxWithdrawEth} ETH</span>
+              <span>{withdrawableNow} ETH</span>
+            </div>
+          )}
+          {needReallocApproval && (
+            <div className="mt-3">
+              <button
+                type="button"
+                disabled={enablingRealloc}
+                onClick={async () => {
+                  try {
+                    setEnablingRealloc(true);
+                    const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
+                    const owner = (primaryWallet?.address as `0x${string}` | undefined) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+                    if (!owner) return;
+                    const res: any = await simulateApproveReallocatorMax(owner, { client: browserPublicClient });
+                    if (res?.alreadyMax) { setNeedReallocApproval(false); return; }
+                    try { if (primaryWallet?.switchChain) await primaryWallet.switchChain(baseSepolia.id); } catch {}
+                    const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
+                    if (!provider) return;
+                    const clientW = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
+                    await clientW.writeContract(res.request);
+                    setNeedReallocApproval(false);
+                  } catch (e) {
+                    // eslint-disable-next-line no-console
+                    console.error("[reallocator] manual enable failed", (e as any)?.message || e);
+                  } finally {
+                    setEnablingRealloc(false);
+                  }
+                }}
+                className="rounded-md border px-3 py-1 text-xs"
+              >{enablingRealloc ? "Enabling…" : "Enable reallocation"}</button>
             </div>
           )}
         </div>
@@ -255,16 +376,16 @@ export default function ProductCard() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="Deposit (ETH)"
-              className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
+              className="w-40 rounded-md border border-white/20 bg-gray-100/80 dark:bg-white/10 text-foreground placeholder:text-muted-foreground/70 shadow-inner px-3 py-2 text-sm"
             />
             <button
               type="button"
               onClick={async () => {
             try {
               const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
-              const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
+              const { provider, address: acct } = await getActiveSigner();
               if (!provider) return;
-              const bal = await (provider as any).request?.({ method: "eth_getBalance", params: [primaryWallet?.address, "latest"] });
+              const bal = await (provider as any).request?.({ method: "eth_getBalance", params: [acct, "latest"] });
               if (!bal) return;
               const wei = BigInt(bal);
               // Keep small gas reserve (~0.0002 ETH)
@@ -281,8 +402,7 @@ export default function ProductCard() {
             if (!ajeyVault) return alert("Vault not configured");
             try {
               setSubmitting(true);
-              const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
-              const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+              const { provider, address: account } = await getActiveSigner();
               if (!account) throw new Error("No connected address");
 
               // debug log
@@ -290,9 +410,7 @@ export default function ProductCard() {
 
               // Ensure wallet is on Base Sepolia using Privy wallet API where possible
               try {
-                if (primaryWallet?.switchChain) {
-                  await primaryWallet.switchChain(baseSepolia.id);
-                }
+                await ensureBaseChain(provider);
               } catch {
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "switchChain_failed" }) });
                 throw new Error("Please switch your wallet network to Base Sepolia");
@@ -305,7 +423,6 @@ export default function ProductCard() {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "deposit", step: "resolved_amount", data: { asset, decimals, assets: assets.toString() } }) });
 
               // Build viem wallet client from embedded wallet provider
-              const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
               const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
 
               // Log current chain id from provider
@@ -420,11 +537,11 @@ export default function ProductCard() {
               value={withdrawAmount}
               onChange={(e) => setWithdrawAmount(e.target.value)}
               placeholder="Withdraw (ETH)"
-              className="w-40 rounded-md border bg-background px-3 py-2 text-sm"
+              className="w-40 rounded-md border border-white/20 bg-gray-100/80 dark:bg-white/10 text-foreground placeholder:text-muted-foreground/70 shadow-inner px-3 py-2 text-sm"
             />
             <button
               type="button"
-              onClick={() => { if (maxWithdrawEth) setWithdrawAmount(maxWithdrawEth); }}
+              onClick={() => { if (withdrawableNow) setWithdrawAmount(withdrawableNow); }}
               className="rounded-md border px-2 py-2 text-xs"
             >Max</button>
             <button
@@ -433,8 +550,7 @@ export default function ProductCard() {
             if (!ajeyVault) return alert("Vault not configured");
             try {
               setWithdrawing(true);
-              const primaryWallet = wallets && wallets.length > 0 ? wallets[0] : undefined;
-              const account = (primaryWallet?.address as `0x${string}`) || ((user as any)?.wallet?.address as `0x${string}` | undefined);
+              const { provider, address: account } = await getActiveSigner();
               if (!account) throw new Error("No connected address");
 
               // debug log
@@ -442,9 +558,7 @@ export default function ProductCard() {
 
               // Ensure wallet is on Base Sepolia
               try {
-                if (primaryWallet?.switchChain) {
-                  await primaryWallet.switchChain(baseSepolia.id);
-                }
+                await ensureBaseChain(provider);
               } catch {
                 fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "switchChain_failed" }) });
                 throw new Error("Please switch your wallet network to Base Sepolia");
@@ -457,7 +571,6 @@ export default function ProductCard() {
               fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "withdraw", step: "resolved_amount", data: { asset, decimals, assets: assets.toString() } }) });
 
               // Build viem wallet client from embedded wallet provider
-              const provider = primaryWallet ? await primaryWallet.getEthereumProvider() : (evmProvider as any);
               const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
 
               // Log current chain id from provider
@@ -522,6 +635,7 @@ export default function ProductCard() {
 
       {/* Agent reasoning trace — light subtle panel */}
       <AgentTracePanel />
+      <style>{`@keyframes sheenSweep{0%{transform:translateX(-55%)}100%{transform:translateX(55%)}}`}</style>
     </div>
   );
 }

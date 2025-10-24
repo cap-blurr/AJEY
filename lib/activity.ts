@@ -37,6 +37,7 @@ export function listActivity(): ActivityItem[] {
 
 export function appendActivityTrace(id: string, line: string) {
   try {
+    if (!id || typeof id !== "string") return; // ignore invalid ids to avoid phantom traces
     const idx = store.items.findIndex((a) => a.id === id);
     if (idx === -1) {
       store.items.unshift({ id, type: "system", status: "running", timestamp: Date.now(), title: "Trace", trace: [line] });

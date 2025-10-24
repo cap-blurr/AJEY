@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import AccountStatusBar from "@/components/personal/AccountStatusBar";
 import ProductCard from "@/components/personal/ProductCard";
+import { useBasename } from "@/lib/basename";
 // import PortfolioPanel from "@/components/personal/PortfolioPanel";
 import ActivityFeed from "@/components/personal/ActivityFeed";
 // import PodSwitcher from "@/components/pod/PodSwitcher";
@@ -20,6 +21,8 @@ import ActivityFeed from "@/components/personal/ActivityFeed";
 export default function HomePage() {
   const { ready, authenticated, user } = usePrivy();
   const router = useRouter();
+  const address = (user?.wallet?.address || "") as `0x${string}` | "";
+  const basename = useBasename(address);
   // const [activeTab, setActiveTab] = useState<"home" | "pod">("home");
   // const [activePod, setActivePod] = useState<`0x${string}` | undefined>(undefined);
 
@@ -37,7 +40,7 @@ export default function HomePage() {
       <div className="container mx-auto py-10 px-4">
         <div className="flex items-baseline justify-between">
           <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-white">Welcome{user?.wallet?.address ? `, ${user.wallet.address}` : ""}.</p>
+          <p className="text-sm text-white">Welcome{address ? `, ${basename || address}` : ""}.</p>
         </div>
 
         {/* Pods UI temporarily disabled for hackathon */}

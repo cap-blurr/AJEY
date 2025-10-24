@@ -2,12 +2,23 @@
 
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
-import { usePrivy } from "@privy-io/react-auth"
+import { usePrivy, useWallets } from "@privy-io/react-auth"
 import { useRouter } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { toCoinType } from "viem"
+import { base } from "viem/chains"
+import { useBasename } from "@/lib/basename"
 
 export function SiteHeader() {
-  const { ready, authenticated, logout } = usePrivy()
+  const { ready, authenticated, logout, user } = usePrivy()
+  const { wallets } = useWallets()
   const router = useRouter()
+
+  const address = useMemo(() => {
+    const a = (wallets && wallets[0]?.address) || ((user as any)?.wallet?.address) || ""
+    return a as `0x${string}` | ""
+  }, [wallets, user])
+  const basename = useBasename(address)
 
   const handleLogout = async () => {
     try {
@@ -23,8 +34,8 @@ export function SiteHeader() {
         <div className="flex items-center space-x-2">
           <ThemeToggle />
           {ready && authenticated ? (
-            <Button onClick={handleLogout}>
-              Logout
+            <Button onClick={handleLogout} title={address || undefined}>
+              {basename ? `Logout ${basename}` : "Logout"}
             </Button>
           ) : null}
         </div>

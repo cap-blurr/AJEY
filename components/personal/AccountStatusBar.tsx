@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { browserPublicClient, formatEth, browserWsPublicClient } from "@/lib/chain";
 import { ERC20_MIN_ABI } from "@/lib/services/vault";
+import { useBasename } from "@/lib/basename";
 
 export default function AccountStatusBar() {
   const { user } = usePrivy();
@@ -13,6 +14,8 @@ export default function AccountStatusBar() {
   const [chainOk, setChainOk] = useState<boolean>(true);
   const [copied, setCopied] = useState(false);
   const usdcDecimalsRef = useRef<number | null>(null);
+
+  const basename = useBasename((address || "") as `0x${string}` | "");
 
   useEffect(() => {
     const a = (user as any)?.wallet?.address || "";
@@ -55,7 +58,7 @@ export default function AccountStatusBar() {
   }, [user]);
 
   return (
-    <div className="w-full rounded-md border px-3 py-2 bg-background/60 backdrop-blur">
+    <div className="w-full rounded-lg border border-white/20 px-4 py-3 bg-white/10 dark:bg-white/5 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="text-xs text-muted-foreground">Network</div>
@@ -84,7 +87,7 @@ export default function AccountStatusBar() {
             className="text-xs font-mono truncate max-w-[260px] hover:underline"
             title="Click to copy"
           >
-            {address || "—"} {copied && <span className="opacity-70">(copied)</span>}
+            {basename || address || "—"} {copied && <span className="opacity-70">(copied)</span>}
           </button>
         </div>
       </div>

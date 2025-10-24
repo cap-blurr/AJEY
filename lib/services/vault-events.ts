@@ -12,6 +12,9 @@ let started: boolean = (globalThis as any).__ajeyWatcherStarted || false;
 let allocating = false;
 let lastHandledDepositTs = 0;
 let currentTraceId: string | undefined;
+// Map txHash -> traceId to correlate success events back to their trace
+let traceByTx: Record<string, string> = (globalThis as any).__ajeyTraceByTx || {};
+(globalThis as any).__ajeyTraceByTx = traceByTx;
 
 const ENABLED = process.env.AGENT_ENABLE_WATCHER !== "false"; // default enabled unless explicitly disabled
 const POLL_MS = Number.parseInt(process.env.VAULT_EVENT_POLL_MS || "60000"); // default 60s to reduce filter churn
@@ -71,8 +74,9 @@ export function startVaultEventWatcher() {
         } catch {}
         // Create a fresh reasoning trace for this deposit cycle
         currentTraceId = `trace_${Date.now()}`;
-        addActivity({ id: currentTraceId, type: "allocate", status: "running", timestamp: Date.now(), title: "Agent reasoning", trace: [] });
-        appendActivityTrace(currentTraceId, "Agent is reasoning…");
+        const myTraceId = currentTraceId; // capture stable id for this run
+        addActivity({ id: myTraceId, type: "allocate", status: "running", timestamp: Date.now(), title: "Agent reasoning", trace: [] });
+        appendActivityTrace(myTraceId, "Agent is reasoning…");
 
         // Debounce frequent deposits to avoid repeated allocations
         const now = Date.now();
@@ -85,7 +89,7 @@ export function startVaultEventWatcher() {
         console.log("[agent] idleUnderlying(wei)", { idleWei: String(idle) });
         // eslint-disable-next-line no-console
         console.log("[trace] line", { id: currentTraceId, line: `Idle balance: ${String(idle)} wei` });
-        if (currentTraceId) appendActivityTrace(currentTraceId, `Idle balance: ${String(idle)} wei`);
+        if (myTraceId) appendActivityTrace(myTraceId, `Idle balance: ${String(idle)} wei`);
         // Idle is in smallest unit (wei); allow 4 decimals on ETH: threshold = 0.0001 ETH
         const threshold = BigInt("100000000000000"); // 1e14 wei
         if (idle < threshold) { console.log("[agent] idleUnderlying below threshold, skip", { idle: idle.toString() }); return; }
@@ -113,37 +117,39 @@ export function startVaultEventWatcher() {
         // eslint-disable-next-line no-console
         console.log("[trace] line", { id: currentTraceId, line: `Rationale: ${planRes?.rationale || ""}` });
         // Append rationale then thinking summary to live trace
-        if (currentTraceId && planRes?.rationale) appendActivityTrace(currentTraceId, `Rationale: ${planRes.rationale}`);
+        if (myTraceId && planRes?.rationale) appendActivityTrace(myTraceId, `Rationale: ${planRes.rationale}`);
         const thinking = (planRes as any)?.plan?.thinkingSummary || (planRes as any)?.thinkingSummary || (Array.isArray(planRes?.thoughts) ? planRes.thoughts[0] : undefined);
-        if (currentTraceId && thinking) appendActivityTrace(currentTraceId, `Thinking: ${thinking}`);
+        if (myTraceId && thinking) appendActivityTrace(myTraceId, `Thinking: ${thinking}`);
 
-        // 3) Choose target: prefer reasoning output else WETH fallback
+        // 3) Choose target: require explicit reasoning output; if missing, do not auto-execute
         const parsed = (planRes?.plan as any) || {};
-        const ranking: any[] = Array.isArray(parsed?.ranking) ? parsed.ranking : [];
-        let target = parsed?.plan;
-        if (!target || !target.amountWei) {
-          const weth = ranking.find((r) => String(r?.symbol).toUpperCase() === "WETH");
-          if (weth) {
-            // Round down to nearest 1e14 wei (0.0001 ETH)
-            const floored = (idle / BigInt(1e14)) * BigInt(1e14);
-            target = { action: "SUPPLY", amountWei: String(floored) };
-          }
+        const target = parsed?.plan && parsed.plan.amountWei ? parsed.plan : undefined;
+        if (!target?.amountWei) {
+          appendActivityTrace(myTraceId, "No plan amount returned by reasoning; skipping allocation.");
+          return;
         }
         console.log("[agent] exec plan", target);
         // eslint-disable-next-line no-console
         console.log("[trace] line", { id: currentTraceId, line: `Execute allocation: amountWei=${String(target?.amountWei || idle)}` });
-        if (currentTraceId) appendActivityTrace(currentTraceId, `Execute allocation: amountWei=${String(target?.amountWei || idle)}`);
+        if (myTraceId) appendActivityTrace(myTraceId, `Execute allocation: amountWei=${String(target?.amountWei || idle)}`);
         if (!target?.amountWei) { console.log("[agent] no target amountWei selected"); return; }
 
-        // 4) Execute via workflow agent (single in-flight)
+        // 4) Execute via workflow agent (single in-flight) — ensure we still own idle funds
         allocating = true;
         try {
+          // Re-check idle just before execution to avoid racing previous supplies
+          const idleNow = await readIdleUnderlying();
+          if (idleNow <= BigInt(0)) {
+            appendActivityTrace(myTraceId, "Idle balance is 0; skipping allocation.");
+            return;
+          }
           const { txHash } = await executeAllocation({ amountWei: String(target.amountWei || idle) });
           // eslint-disable-next-line no-console
           console.log("[agent] allocation submitted", { txHash });
           // eslint-disable-next-line no-console
-          console.log("[trace] line", { id: currentTraceId, line: `Allocation submitted: ${txHash}` });
-          if (currentTraceId) appendActivityTrace(currentTraceId, `Allocation submitted: ${txHash}`);
+          console.log("[trace] line", { id: myTraceId, line: `Allocation submitted: ${txHash}` });
+          if (myTraceId) appendActivityTrace(myTraceId, `Allocation submitted: ${txHash}`);
+          try { if (txHash) traceByTx[txHash] = myTraceId; } catch {}
           addActivity({ id: `alloc_${Date.now()}`, type: "allocate", status: "success", timestamp: Date.now(), title: `Auto-allocate tx: ${txHash}` });
         } finally {
           allocating = false;
@@ -171,11 +177,20 @@ export function startVaultEventWatcher() {
         addActivity({ id: `ainv_${Date.now()}`, type: "agent_invest", status: "success", timestamp: Date.now(), title: `Agent invested ${amount ? formatEth(amount) : "?"} WETH → Aave`, details: txHash || "" });
       } catch {}
       addActivity({ id: `evt_${Date.now()}`, type: "vault", status: "success", timestamp: Date.now(), title: `SuppliedToAave x${logs.length}` });
-      if (currentTraceId) {
-        appendActivityTrace(currentTraceId, "Supplied to Aave ✓");
-        updateActivity(currentTraceId, { status: "success" });
-        currentTraceId = undefined;
-      }
+      try {
+        const last: any = logs[logs.length - 1];
+        const txHash = last?.transactionHash as string | undefined;
+        const traced = txHash ? traceByTx[txHash] : undefined;
+        if (!traced) {
+          // Ignore supply events that do not correspond to a trace we submitted.
+          // This prevents prematurely marking success for older/parallel events.
+          return;
+        }
+        appendActivityTrace(traced, "Supplied to Aave ✓");
+        updateActivity(traced, { status: "success" });
+        try { delete traceByTx[txHash!]; } catch {}
+        // Do NOT clear currentTraceId here; allow in-flight appends to complete
+      } catch {}
     },
   });
 

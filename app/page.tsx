@@ -19,7 +19,7 @@ export default function IndexPage() {
     },
   });
   return (
-    <section className="container grid items-center gap-6 pb-8 pt-6 md:py-10 mx-auto justify-center mt-20">
+    <section className="relative container grid items-center gap-6 pb-8 pt-6 md:py-10 mx-auto justify-center mt-20">
       
       <div className="flex max-w-[980px] flex-col items-center gap-6 retro-theme relative">
         <div className="z-10 flex flex-col items-center gap-4">
@@ -45,11 +45,11 @@ export default function IndexPage() {
             ) : (
               <Button
                 onClick={() =>
-                  login({ loginMethods: ["email"], walletChainType: "ethereum-only" })
+                  login({ loginMethods: ["email", "wallet"], walletChainType: "ethereum-only" })
                 }
                 className={cn(buttonVariants())}
               >
-                Continue with Email
+                Continue with Email or Base
               </Button>
             )}
           </div>
@@ -57,6 +57,8 @@ export default function IndexPage() {
       
       
       </div>
+      {/* Match home page gradient background */}
+      <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#ff00aaff] via-[#7c3aed66] to-transparent to-90% dark:from-[#ff00aaee] dark:via-[#7c3aed88]" />
       <RetroGrid className="z-0 absolute inset-0 max-w-[1000]" /> 
       <div className="flex gap-4 justify-center"></div>
     
