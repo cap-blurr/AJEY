@@ -4,7 +4,14 @@ import { generatePlan } from "@/lib/agents/openai";
 // SOAP removed. In the new architecture, forward this plan to the internal workflow queue
 // or an HTTPS endpoint owned by the workflow agent service (to be implemented).
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function POST(req: NextRequest) {
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return NextResponse.json({}, { status: 204, headers: { "Cache-Control": "no-store" } });
+  }
   const body = await req.json().catch(() => ({}));
   const signedIntent = body?.signedIntent || body;
 
