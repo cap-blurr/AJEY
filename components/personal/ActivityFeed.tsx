@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getActivity } from "@/lib/services/vault";
+import { useWallets, usePrivy } from "@privy-io/react-auth";
 import { ajeyVault } from "@/lib/services/vault";
 import { browserPublicClient, browserWsPublicClient, formatEth } from "@/lib/chain";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
@@ -18,6 +19,17 @@ type Item = {
 export default function ActivityFeed() {
   const [items, setItems] = useState<Item[]>([]);
   const seen = useRef<Set<string>>(new Set());
+  const { wallets } = useWallets();
+  const { user } = usePrivy();
+  const myAddress = ((): string | null => {
+    try {
+      const primary = wallets && wallets.length > 0 ? wallets[0] : undefined;
+      const addr = (primary?.address as string | undefined) || ((user as any)?.wallet?.address as string | undefined);
+      return addr ? addr.toLowerCase() : null;
+    } catch {
+      return null;
+    }
+  })();
  
 
   useEffect(() => {
@@ -25,10 +37,23 @@ export default function ActivityFeed() {
     let unwatchers: Array<() => void> = [];
     let es: EventSource | null = null;
     let stopped = false;
+    // Hydrate from localStorage immediately for snappy UX
+    try {
+      if (typeof window !== "undefined" && myAddress) {
+        const raw = window.localStorage.getItem(`activity:${myAddress}`);
+        if (raw) {
+          const cached: Item[] = JSON.parse(raw);
+          if (Array.isArray(cached) && cached.length) setItems(cached);
+        }
+      }
+    } catch {}
     const loadOnce = async () => {
       try {
         const d = await getActivity();
-        const list: Item[] = (d.items || []) as Item[];
+        const allowTypes = new Set(["user_deposit", "user_withdraw"]);
+        const list: Item[] = ((d.items || []) as Item[])
+          .filter((it: any) => allowTypes.has((it as any)?.type || ""))
+          .filter((it: any) => (myAddress ? ((it as any)?.address || "").toLowerCase() === myAddress : true));
         // newest-first by timestamp
         list.sort((a, b) => b.timestamp - a.timestamp);
         if (!stopped) {
@@ -37,6 +62,7 @@ export default function ActivityFeed() {
             const key = it.details || it.id;
             if (key) seen.current.add(key);
           }
+          try { if (typeof window !== "undefined" && myAddress) window.localStorage.setItem(`activity:${myAddress}`, JSON.stringify(list.slice(0, 50))); } catch {}
         }
       } catch {}
     };
@@ -47,9 +73,10 @@ export default function ActivityFeed() {
       const onSnapshot = (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
+          const allowTypes = new Set(["user_deposit", "user_withdraw"]);
           const list: Item[] = ((data?.items || []) as Item[])
-            // exclude agent reasoning traces
-            .filter((it) => !["allocate"].includes((it as any)?.type || ""));
+            .filter((it: any) => allowTypes.has((it as any)?.type || ""))
+            .filter((it: any) => (myAddress ? ((it as any)?.address || "").toLowerCase() === myAddress : true));
           list.sort((a, b) => b.timestamp - a.timestamp);
           if (!stopped) {
             setItems(list);
@@ -57,6 +84,7 @@ export default function ActivityFeed() {
               const key = it.details || it.id;
               if (key) seen.current.add(key);
             }
+            try { if (typeof window !== "undefined" && myAddress) window.localStorage.setItem(`activity:${myAddress}`, JSON.stringify(list.slice(0, 50))); } catch {}
           }
           // eslint-disable-next-line no-console
           console.log("[activity:sse] snapshot", { count: list.length });
@@ -65,8 +93,10 @@ export default function ActivityFeed() {
       const onAdd = (e: MessageEvent) => {
         try {
           const it = JSON.parse(e.data) as Item;
-          // exclude agent reasoning
-          if ((it as any)?.type === "allocate") return;
+          const t = (it as any)?.type || "";
+          if (!new Set(["user_deposit", "user_withdraw"]).has(t)) return;
+          const addr = ((it as any)?.address || "").toLowerCase();
+          if (myAddress && addr !== myAddress) return;
           const key = it?.details || it?.id;
           if (!it || !key) return;
           if (seen.current.has(key)) return;
@@ -74,7 +104,9 @@ export default function ActivityFeed() {
           if (!stopped) setItems((prev) => {
             const next = [it, ...prev];
             next.sort((a, b) => b.timestamp - a.timestamp);
-            return next.slice(0, 50);
+            const trimmed = next.slice(0, 50);
+            try { if (typeof window !== "undefined" && myAddress) window.localStorage.setItem(`activity:${myAddress}`, JSON.stringify(trimmed)); } catch {}
+            return trimmed;
           });
           // eslint-disable-next-line no-console
           console.log("[activity:sse] add", { title: it?.title });
@@ -84,7 +116,11 @@ export default function ActivityFeed() {
         try {
           const it = JSON.parse(e.data) as Item;
           if (!it?.id) return;
-          if (!stopped) setItems((prev) => prev.map((p) => (p.id === it.id ? { ...p, ...it } : p)));
+          if (!stopped) setItems((prev) => {
+            const next = prev.map((p) => (p.id === it.id ? { ...p, ...it } : p));
+            try { if (typeof window !== "undefined" && myAddress) window.localStorage.setItem(`activity:${myAddress}`, JSON.stringify(next.slice(0, 50))); } catch {}
+            return next;
+          });
           // eslint-disable-next-line no-console
           console.log("[activity:sse] update", { id: it?.id, status: (it as any)?.status });
         } catch {}
@@ -114,40 +150,33 @@ export default function ActivityFeed() {
               setItems((prev) => {
                 const next = [it, ...prev];
                 next.sort((a, b) => b.timestamp - a.timestamp);
-                return next.slice(0, 50);
+                const trimmed = next.slice(0, 50);
+                try { if (typeof window !== "undefined" && myAddress) window.localStorage.setItem(`activity:${myAddress}`, JSON.stringify(trimmed)); } catch {}
+                return trimmed;
               });
             }
           } });
 
-        // ERC-4626 Deposit(owner, receiver, assets, shares)
+        // ERC-4626 Deposit(owner, receiver, assets, shares) — filter to my address
         unwatchers.push(base("Deposit", (log) => {
           const assets: bigint | undefined = (log?.args?.assets as any);
+          const owner: string | undefined = (log?.args?.owner as any);
           const tx: string | undefined = log?.transactionHash;
-          if (!assets) return null;
+          if (!assets || !owner) return null;
+          if (myAddress && owner.toLowerCase() !== myAddress) return null;
           return { id: `dep_${Date.now()}`, title: `Deposit ${formatEth(assets)} ETH`, status: "success", timestamp: Date.now(), details: tx };
         }));
 
-        // ERC-4626 Withdraw(owner, receiver, assets, shares)
+        // ERC-4626 Withdraw(owner, receiver, assets, shares) — filter to my address
         unwatchers.push(base("Withdraw", (log) => {
           const assets: bigint | undefined = (log?.args?.assets as any);
+          const owner: string | undefined = (log?.args?.owner as any);
           const tx: string | undefined = log?.transactionHash;
-          if (!assets) return null;
+          if (!assets || !owner) return null;
+          if (myAddress && owner.toLowerCase() !== myAddress) return null;
           return { id: `wd_${Date.now()}`, title: `Withdraw ${formatEth(assets)} ETH`, status: "success", timestamp: Date.now(), details: tx };
         }));
-
-        // Custom: SuppliedToAave(amount)
-        unwatchers.push(base("SuppliedToAave", (log) => {
-          const amount: bigint | undefined = (log?.args?.amount as any) || (log?.args?.assets as any);
-          const tx: string | undefined = log?.transactionHash;
-          return { id: `ainv_${Date.now()}`, title: `Agent invested ${amount ? formatEth(amount) : "?"} WETH → Aave`, status: "success", timestamp: Date.now(), details: tx };
-        }));
-
-        // Custom: WithdrawnFromAave(amount)
-        unwatchers.push(base("WithdrawnFromAave", (log) => {
-          const amount: bigint | undefined = (log?.args?.amount as any) || (log?.args?.assets as any);
-          const tx: string | undefined = log?.transactionHash;
-          return { id: `arealloc_${Date.now()}`, title: `Agent reallocated: withdrew ${amount ? formatEth(amount) : "?"} WETH from Aave`, status: "success", timestamp: Date.now(), details: tx };
-        }));
+        // Omit agent events from personal activity feed
       } else {
         // eslint-disable-next-line no-console
         console.log("[activity] client not available for watchers");
@@ -157,7 +186,7 @@ export default function ActivityFeed() {
       console.error("[activity] watchers setup failed", e?.message || e);
     }
     return () => { stopped = true; try { unwatchers.forEach((u) => u && u()); } catch {}; if (es) try { es.close(); } catch {}; if (t) clearTimeout(t); };
-  }, []);
+  }, [myAddress, wallets, user]);
 
   return (
     <div className="relative rounded-2xl border border-white/20 p-6 bg-black/10 dark:bg-black/50 backdrop-blur-xl shadow-[0_0_1px_rgba(255,255,255,0.25),0_10px_40px_-10px_rgba(124,58,237,0.35)]">

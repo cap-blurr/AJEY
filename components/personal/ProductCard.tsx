@@ -26,6 +26,7 @@ export default function ProductCard() {
   const { user } = usePrivy();
   const { wallets } = useWallets();
   const reallocPromptedRef = useRef(false);
+  const [activeAddress, setActiveAddress] = useState<`0x${string}` | null>(null);
   // Max withdraw is derived from live withdrawableNow; avoid separate stale state
 
   const evmProvider = useMemo(() => {
@@ -65,6 +66,15 @@ export default function ProductCard() {
       await provider?.request?.({ method: "wallet_switchEthereumChain", params: [{ chainId: toHex(baseSepolia.id) }] });
     } catch {}
   }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { address } = await getActiveSigner();
+        setActiveAddress(address || null);
+      } catch {}
+    })();
+  }, [wallets, user]);
 
   useEffect(() => {
     let stopped = false;
@@ -634,7 +644,7 @@ export default function ProductCard() {
       </div>
 
       {/* Agent reasoning trace — light subtle panel */}
-      <AgentTracePanel />
+      <AgentTracePanel userAddress={activeAddress || undefined} />
       <style>{`@keyframes sheenSweep{0%{transform:translateX(-55%)}100%{transform:translateX(55%)}}`}</style>
     </div>
   );
@@ -670,7 +680,7 @@ function estimateYieldText(data: VaultSummary | null) {
   return `${apr}%`;
 }
 
-  function AgentTracePanel() {
+const AgentTracePanel: React.FC<{ userAddress?: string }> = ({ userAddress }) => {
     const [current, setCurrent] = useState<{ id: string; lines: string[]; status: string } | null>(null);
     const [visibleCount, setVisibleCount] = useState(0);
     const linesRef = (typeof window !== "undefined" ? (window as any).ReactTraceLinesRef : undefined) || { current: [] as string[] };
@@ -678,10 +688,11 @@ function estimateYieldText(data: VaultSummary | null) {
     // Track latest trace id across SSE callbacks to avoid stale closures
     const currentIdRef = useRef<string | null>(null);
     // Keep a ref to the live EventSource for proper cleanup
-    const esRef = useRef<EventSource | null>(null);
+  const esRef = useRef<EventSource | null>(null);
     // Animate fade-out on completion
     const [exiting, setExiting] = useState(false);
     useEffect(() => {
+      if (!userAddress) return;
       let ticker: any;
       let stopped = false;
       async function fetchOnce() {
@@ -689,7 +700,9 @@ function estimateYieldText(data: VaultSummary | null) {
           const res = await fetch("/api/activity", { cache: "no-store" });
           const data = await res.json();
           const items = (data?.items || []) as Array<any>;
-          const traced = items.filter((x) => x?.type === "allocate" && Array.isArray(x.trace) && x.trace.length > 0);
+          const traced = items
+            .filter((x) => x?.type === "allocate" && Array.isArray(x.trace) && x.trace.length > 0)
+            .filter((x) => (userAddress ? String(x?.address || "").toLowerCase() === userAddress.toLowerCase() : true));
           if (traced.length > 0) {
             const latest = traced[0];
             const id = latest.id as string;
@@ -719,6 +732,8 @@ function estimateYieldText(data: VaultSummary | null) {
             // eslint-disable-next-line no-console
             console.log("[trace] snapshot", { items: (data?.items || []).length, hasTrace: !!latest });
             if (latest && Array.isArray(latest.trace)) {
+              const addr = String(latest?.address || "").toLowerCase();
+              if (userAddress && addr !== userAddress.toLowerCase()) return;
               currentIdRef.current = latest.id;
               setCurrent({ id: latest.id, lines: latest.trace, status: latest.status });
               linesRef.current = latest.trace;
@@ -732,6 +747,8 @@ function estimateYieldText(data: VaultSummary | null) {
             // eslint-disable-next-line no-console
             console.log("[trace] activity:trace", { id: payload?.id, count: (payload?.lines || []).length });
             if (payload?.id && Array.isArray(payload.lines)) {
+              const addr = String(payload?.address || "").toLowerCase();
+              if (userAddress && addr !== userAddress.toLowerCase()) return;
               currentIdRef.current = payload.id;
               setCurrent({ id: payload.id, lines: payload.lines, status: "running" });
               linesRef.current = payload.lines;
@@ -763,8 +780,11 @@ function estimateYieldText(data: VaultSummary | null) {
         try { if (esRef.current) esRef.current.close(); } catch {}
         esRef.current = null;
         clearInterval(ticker);
+        setCurrent(null);
+        setVisibleCount(0);
+        linesRef.current = [];
       };
-    }, []);
+    }, [userAddress]);
 
     // Keep newest line focused visually by anchoring to bottom via CSS (no imperative scroll)
     useEffect(() => {
@@ -815,6 +835,6 @@ function estimateYieldText(data: VaultSummary | null) {
         <style>{`@keyframes slideUpFade{from{transform:translateY(8px);opacity:.0;filter:blur(1px)}to{transform:translateY(0);opacity:1;filter:blur(0)}}@keyframes pulseHighlight{0%{background:rgba(255,255,255,.16)}100%{background:transparent}}`}</style>
       </div>
     );
-  }
+  };
 
 

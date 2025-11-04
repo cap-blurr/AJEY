@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addActivity } from "@/lib/activity";
-import { generateReasoningPlan } from "@/lib/agents/gemini";
+import { generateReasoningPlan } from "@/lib/agents/openai";
 import { executeAllocation } from "@/lib/agents/workflow";
 import { ajeyVault, readIdleUnderlying } from "@/lib/services/vault";
 import { fetchAaveSupplySnapshot } from "@/lib/services/aave-markets";
