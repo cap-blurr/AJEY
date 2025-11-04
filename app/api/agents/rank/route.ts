@@ -3,7 +3,7 @@ import { fetchAaveSupplySnapshot } from "@/lib/services/aave-markets";
 import { publicClient } from "@/lib/chain";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
 import { ajeyVault, ERC20_MIN_ABI } from "@/lib/services/vault";
-import { generateReasoningPlan } from "@/lib/agents/gemini";
+import { generateReasoningPlan } from "@/lib/agents/openai";
 
 export async function GET() {
   try {

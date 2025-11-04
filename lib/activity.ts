@@ -7,6 +7,7 @@ export type ActivityItem = {
   timestamp: number;
   title: string;
   details?: string;
+  address?: string;
   trace?: string[];
   usage?: { thoughtsTokenCount?: number; candidatesTokenCount?: number };
 };
@@ -155,7 +156,13 @@ export function appendActivityTracePersisted(id: string, line: string) {
   _origAppend(id, line);
   try {
     const idx = store.items.findIndex((a) => a.id === id);
-    if (idx !== -1) redisSetItem(store.items[idx]).catch(() => {});
+    if (idx !== -1) {
+      const item = store.items[idx];
+      redisSetItem(item).catch(() => {});
+      try {
+        getActivityEmitter().emit("activity:trace", { id, line, lines: item.trace, address: item.address });
+      } catch {}
+    }
   } catch {}
 }
 

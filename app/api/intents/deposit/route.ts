@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addActivity } from "@/lib/activity";
-import { generatePlan } from "@/lib/agents/gemini";
+import { generatePlan } from "@/lib/agents/openai";
 // SOAP removed. In the new architecture, forward this plan to the internal workflow queue
 // or an HTTPS endpoint owned by the workflow agent service (to be implemented).
 

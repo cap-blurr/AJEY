@@ -3,7 +3,7 @@ import { ajeyVault, readIdleUnderlying, rebasingWrapper } from "@/lib/services/v
 import { addActivityPersisted as addActivity, appendActivityTracePersisted as appendActivityTrace, updateActivityPersisted as updateActivity } from "@/lib/activity";
 import { fetchPoolYields } from "@/lib/services/aave";
 import { executeAllocation } from "@/lib/agents/workflow";
-import { generateReasoningPlan } from "@/lib/agents/gemini";
+import { generateReasoningPlan } from "@/lib/agents/openai";
 import { runRebaseCycle } from "@/lib/agents/rebase";
 import { fetchAaveSupplySnapshot } from "@/lib/services/aave-markets";
 import { getWalletClient } from "@/lib/agents/wallet";
@@ -21,7 +21,7 @@ const POLL_MS = Number.parseInt(process.env.VAULT_EVENT_POLL_MS || "60000"); // 
 const MIN_ALLOCATE_INTERVAL_MS = Number.parseInt(process.env.AGENT_MIN_ALLOCATE_INTERVAL_MS || "60000"); // default 60s
 const REBASE_INTERVAL_MS = Number.parseInt(process.env.AGENT_REBASE_INTERVAL_MS || "300000"); // default 5m
 
-export function startVaultEventWatcher() {
+export async function startVaultEventWatcher() {
   if (started) return;
   if (!ENABLED) {
     // eslint-disable-next-line no-console
@@ -41,6 +41,10 @@ export function startVaultEventWatcher() {
   const eventClient: any = wsPublicClient || publicClient;
   const usePolling = !wsPublicClient; // prefer WebSocket subscriptions if available
 
+  // Capture current head and only watch new events from the next block forward to avoid replaying history on startup
+  let startHead: bigint | undefined = undefined;
+  try { startHead = await publicClient.getBlockNumber(); } catch {}
+
   // Helper: check if event exists in ABI to avoid runtime errors
   const abiHasEvent = (abi: any[], name: string) => {
     try {
@@ -56,11 +60,13 @@ export function startVaultEventWatcher() {
     eventName: "Deposit",
     poll: usePolling,
     pollingInterval: POLL_MS,
+    fromBlock: startHead ? (startHead + BigInt(1)) : undefined,
     onLogs: async (logs: any[]) => {
       try {
         const last: any = logs[logs.length - 1];
         const head = await publicClient.getBlockNumber().catch(() => undefined);
         const assets = last?.args?.assets as bigint | undefined;
+        const owner = (last?.args?.owner as `0x${string}` | undefined) || (last?.args?.caller as `0x${string}` | undefined);
         const txHash = (last as any)?.transactionHash as string | undefined;
         // eslint-disable-next-line no-console
         console.log("[agent] Deposit event detected", { count: logs.length, assets: String(assets ?? BigInt(0)), blockNumber: head?.toString(), tx: txHash });
@@ -70,13 +76,13 @@ export function startVaultEventWatcher() {
         try {
           if (assets) {
             const id = txHash ? `dep_${txHash}` : `dep_${Date.now()}`;
-            addActivity({ id, type: "user_deposit", status: "success", timestamp: Date.now(), title: `Deposit ${formatEth(assets)} ETH`, details: txHash || "" });
+            addActivity({ id, type: "user_deposit", status: "success", timestamp: Date.now(), title: `Deposit ${formatEth(assets)} ETH`, details: txHash || "", address: owner });
           }
         } catch {}
         // Create a fresh reasoning trace for this deposit cycle
         currentTraceId = `trace_${Date.now()}`;
         const myTraceId = currentTraceId; // capture stable id for this run
-        addActivity({ id: myTraceId, type: "allocate", status: "running", timestamp: Date.now(), title: "Agent reasoning", trace: [] });
+        addActivity({ id: myTraceId, type: "allocate", status: "running", timestamp: Date.now(), title: "Agent reasoning", trace: [], address: owner });
         appendActivityTrace(myTraceId, "Agent is reasoning…");
 
         // Debounce frequent deposits to avoid repeated allocations
@@ -168,6 +174,7 @@ export function startVaultEventWatcher() {
     eventName: "SuppliedToAave",
     poll: usePolling,
     pollingInterval: POLL_MS,
+    fromBlock: startHead ? (startHead + BigInt(1)) : undefined,
     onLogs: (logs: any[]) => {
       // eslint-disable-next-line no-console
       console.log("[agent] SuppliedToAave", { count: logs.length });
@@ -200,6 +207,7 @@ export function startVaultEventWatcher() {
     eventName: "WithdrawnFromAave",
     poll: usePolling,
     pollingInterval: POLL_MS,
+    fromBlock: startHead ? (startHead + BigInt(1)) : undefined,
     onLogs: (logs: any[]) => {
       // eslint-disable-next-line no-console
       console.log("[agent] WithdrawnFromAave", { count: logs.length });
@@ -219,13 +227,15 @@ export function startVaultEventWatcher() {
     eventName: "Withdraw",
     poll: usePolling,
     pollingInterval: POLL_MS,
+    fromBlock: startHead ? (startHead + BigInt(1)) : undefined,
     onLogs: (logs: any[]) => {
       try {
         const last: any = logs[logs.length - 1];
         const assets = last?.args?.assets as bigint | undefined;
         const txHash = last?.transactionHash as string | undefined;
+        const owner = (last?.args?.owner as `0x${string}` | undefined);
         const id = txHash ? `wd_${txHash}` : `wd_${Date.now()}`;
-        addActivity({ id, type: "user_withdraw", status: "success", timestamp: Date.now(), title: `Withdraw ${assets ? formatEth(assets) : "?"} ETH`, details: txHash || "" });
+        addActivity({ id, type: "user_withdraw", status: "success", timestamp: Date.now(), title: `Withdraw ${assets ? formatEth(assets) : "?"} ETH`, details: txHash || "", address: owner });
       } catch {}
     },
   });
@@ -248,6 +258,7 @@ export function startVaultEventWatcher() {
       eventName: "Rebased",
       poll: usePolling,
       pollingInterval: POLL_MS,
+      fromBlock: startHead ? (startHead + BigInt(1)) : undefined,
       onLogs: (logs: any[]) => {
         // eslint-disable-next-line no-console
         console.log("[agent] Wrapper Rebased", { count: logs.length });
