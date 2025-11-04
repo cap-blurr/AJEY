@@ -5,7 +5,15 @@ import { AjeyVaultAbi } from "@/abi/AjeyVault";
 import { ajeyVault, ERC20_MIN_ABI } from "@/lib/services/vault";
 import { generateReasoningPlan } from "@/lib/agents/openai";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
+  // Avoid static export/prerender at build time
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return NextResponse.json({}, { status: 204, headers: { "Cache-Control": "no-store" } });
+  }
   try {
     const head = await publicClient.getBlockNumber().catch(() => undefined);
     const market = await fetchAaveSupplySnapshot();

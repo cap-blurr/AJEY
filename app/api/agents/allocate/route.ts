@@ -5,8 +5,15 @@ import { executeAllocation } from "@/lib/agents/workflow";
 import { ajeyVault, readIdleUnderlying } from "@/lib/services/vault";
 import { fetchAaveSupplySnapshot } from "@/lib/services/aave-markets";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // Accepts optional overrides { idleWei: string, vaultAddress: string }
 export async function POST(req: NextRequest) {
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return NextResponse.json({}, { status: 204, headers: { "Cache-Control": "no-store" } });
+  }
   const body = await req.json().catch(() => ({}));
   let idleWei = body?.idleWei as string | undefined;
   let vaultAddress = body?.vaultAddress as string | undefined;
