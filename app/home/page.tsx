@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import AccountStatusBar from "@/components/personal/AccountStatusBar";
 import ProductCard from "@/components/personal/ProductCard";
+import OctantDonationProductCard from "@/components/personal/OctantDonationProductCard";
 import { useBasename } from "@/lib/basename";
 // import PortfolioPanel from "@/components/personal/PortfolioPanel";
 import ActivityFeed from "@/components/personal/ActivityFeed";
@@ -51,6 +52,10 @@ export default function HomePage() {
             <div>
               <h2 className="text-lg font-semibold mb-2">Ajey Vault</h2>
               <ProductCard />
+              <div className="mt-10">
+                <h2 className="text-lg font-semibold mb-2">Octant Donation Product</h2>
+                <OctantDonationProductCard />
+              </div>
             </div>
             <div className="hidden md:block" />
             <div>
