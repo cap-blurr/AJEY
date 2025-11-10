@@ -1,0 +1,170 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "exactInputSingle",
+      "inputs": [
+        {
+          "name": "params",
+          "type": "tuple",
+          "internalType": "struct IUniswapV3Router.ExactInputSingleParams",
+          "components": [
+            { "name": "tokenIn", "type": "address", "internalType": "address" },
+            {
+              "name": "tokenOut",
+              "type": "address",
+              "internalType": "address"
+            },
+            { "name": "fee", "type": "uint24", "internalType": "uint24" },
+            {
+              "name": "recipient",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "deadline",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "amountIn",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "amountOutMinimum",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "sqrtPriceLimitX96",
+              "type": "uint160",
+              "internalType": "uint160"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        { "name": "amountOut", "type": "uint256", "internalType": "uint256" }
+      ],
+      "stateMutability": "payable"
+    }
+  ],
+  "bytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "deployedBytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "methodIdentifiers": {
+    "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))": "414bf389"
+  },
+  "rawMetadata": "{\"compiler\":{\"version\":\"0.8.26+commit.8a97fa7a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"components\":[{\"internalType\":\"address\",\"name\":\"tokenIn\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"tokenOut\",\"type\":\"address\"},{\"internalType\":\"uint24\",\"name\":\"fee\",\"type\":\"uint24\"},{\"internalType\":\"address\",\"name\":\"recipient\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"deadline\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amountIn\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amountOutMinimum\",\"type\":\"uint256\"},{\"internalType\":\"uint160\",\"name\":\"sqrtPriceLimitX96\",\"type\":\"uint160\"}],\"internalType\":\"struct IUniswapV3Router.ExactInputSingleParams\",\"name\":\"params\",\"type\":\"tuple\"}],\"name\":\"exactInputSingle\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"amountOut\",\"type\":\"uint256\"}],\"stateMutability\":\"payable\",\"type\":\"function\"}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{\"exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))\":{\"params\":{\"params\":\"The parameters for the swap\"},\"returns\":{\"amountOut\":\"The amount of the received token\"}}},\"title\":\"IUniswapV3Router\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{\"exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))\":{\"notice\":\"Swaps `amountIn` of one token for as much as possible of another token\"}},\"notice\":\"Minimal interface for Uniswap V3 SwapRouter\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/interfaces/IUniswapV3Router.sol\":\"IUniswapV3Router\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[\":@octant-core/=lib/octant-v2-core/src/\",\":@openzeppelin/=lib/openzeppelin-contracts/\",\":forge-std/=lib/forge-std/src/\"],\"viaIR\":true},\"sources\":{\"src/interfaces/IUniswapV3Router.sol\":{\"keccak256\":\"0xf5ba7bf48d6b3202d8123d5d34506ed4c8b633b19349dbfd17518c7cd4d9c072\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://b0985076acb895932b6a73180ffc147e4da3c4c82bd69951b99361f182685662\",\"dweb:/ipfs/QmNxgrGdGPfK89Y1uiWdXHP4zWBZrnVMPWwSsa2Hy3XFTW\"]}},\"version\":1}",
+  "metadata": {
+    "compiler": { "version": "0.8.26+commit.8a97fa7a" },
+    "language": "Solidity",
+    "output": {
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "struct IUniswapV3Router.ExactInputSingleParams",
+              "name": "params",
+              "type": "tuple",
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "tokenIn",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "tokenOut",
+                  "type": "address"
+                },
+                { "internalType": "uint24", "name": "fee", "type": "uint24" },
+                {
+                  "internalType": "address",
+                  "name": "recipient",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "deadline",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amountIn",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amountOutMinimum",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint160",
+                  "name": "sqrtPriceLimitX96",
+                  "type": "uint160"
+                }
+              ]
+            }
+          ],
+          "stateMutability": "payable",
+          "type": "function",
+          "name": "exactInputSingle",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "amountOut",
+              "type": "uint256"
+            }
+          ]
+        }
+      ],
+      "devdoc": {
+        "kind": "dev",
+        "methods": {
+          "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))": {
+            "params": { "params": "The parameters for the swap" },
+            "returns": { "amountOut": "The amount of the received token" }
+          }
+        },
+        "version": 1
+      },
+      "userdoc": {
+        "kind": "user",
+        "methods": {
+          "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))": {
+            "notice": "Swaps `amountIn` of one token for as much as possible of another token"
+          }
+        },
+        "version": 1
+      }
+    },
+    "settings": {
+      "remappings": [
+        "@octant-core/=lib/octant-v2-core/src/",
+        "@openzeppelin/=lib/openzeppelin-contracts/",
+        "forge-std/=lib/forge-std/src/"
+      ],
+      "optimizer": { "enabled": true, "runs": 200 },
+      "metadata": { "bytecodeHash": "ipfs" },
+      "compilationTarget": {
+        "src/interfaces/IUniswapV3Router.sol": "IUniswapV3Router"
+      },
+      "evmVersion": "cancun",
+      "libraries": {},
+      "viaIR": true
+    },
+    "sources": {
+      "src/interfaces/IUniswapV3Router.sol": {
+        "keccak256": "0xf5ba7bf48d6b3202d8123d5d34506ed4c8b633b19349dbfd17518c7cd4d9c072",
+        "urls": [
+          "bzz-raw://b0985076acb895932b6a73180ffc147e4da3c4c82bd69951b99361f182685662",
+          "dweb:/ipfs/QmNxgrGdGPfK89Y1uiWdXHP4zWBZrnVMPWwSsa2Hy3XFTW"
+        ],
+        "license": "MIT"
+      }
+    },
+    "version": 1
+  },
+  "id": 52
+}

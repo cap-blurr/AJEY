@@ -1,10 +1,9 @@
 import { publicClient, wsPublicClient, formatEth } from "@/lib/chain";
-import { ajeyVault, readIdleUnderlying, rebasingWrapper } from "@/lib/services/vault";
+import { ajeyVault, readIdleUnderlying } from "@/lib/services/vault";
 import { addActivityPersisted as addActivity, appendActivityTracePersisted as appendActivityTrace, updateActivityPersisted as updateActivity } from "@/lib/activity";
 import { fetchPoolYields } from "@/lib/services/aave";
 import { executeAllocation } from "@/lib/agents/workflow";
 import { generateReasoningPlan } from "@/lib/agents/openai";
-import { runRebaseCycle } from "@/lib/agents/rebase";
 import { fetchAaveSupplySnapshot } from "@/lib/services/aave-markets";
 import { getWalletClient } from "@/lib/agents/wallet";
 
@@ -34,7 +33,6 @@ export async function startVaultEventWatcher() {
   const vault = ajeyVault!;
   // eslint-disable-next-line no-console
   console.log("[agent] starting vault event watcher", { vault: vault.address });
-  const wrapper = rebasingWrapper;
   // Create wallet once to ensure readiness; avoid logging sensitive info
   try { getWalletClient("default"); } catch {}
 
@@ -252,20 +250,7 @@ export async function startVaultEventWatcher() {
     },
   });
 
-  if (wrapper) {
-    if (abiHasEvent((wrapper as any).abi as any[], "Rebased")) eventClient.watchContractEvent({
-      ...wrapper,
-      eventName: "Rebased",
-      poll: usePolling,
-      pollingInterval: POLL_MS,
-      fromBlock: startHead ? (startHead + BigInt(1)) : undefined,
-      onLogs: (logs: any[]) => {
-        // eslint-disable-next-line no-console
-        console.log("[agent] Wrapper Rebased", { count: logs.length });
-        addActivity({ id: `evt_${Date.now()}`, type: "vault", status: "success", timestamp: Date.now(), title: `Wrapper rebased x${logs.length}` });
-      },
-    });
-  }
+  // Rebasing wrapper events removed; no wrapper in this build.
 
   // Periodic rebase cycle
   // Rebase scheduler removed: rebase should not run on an interval.

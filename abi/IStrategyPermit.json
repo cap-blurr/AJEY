@@ -1,0 +1,80 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "permit",
+      "inputs": [
+        { "name": "owner", "type": "address", "internalType": "address" },
+        { "name": "spender", "type": "address", "internalType": "address" },
+        { "name": "value", "type": "uint256", "internalType": "uint256" },
+        { "name": "deadline", "type": "uint256", "internalType": "uint256" },
+        { "name": "v", "type": "uint8", "internalType": "uint8" },
+        { "name": "r", "type": "bytes32", "internalType": "bytes32" },
+        { "name": "s", "type": "bytes32", "internalType": "bytes32" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    }
+  ],
+  "bytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "deployedBytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "methodIdentifiers": {
+    "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)": "d505accf"
+  },
+  "rawMetadata": "{\"compiler\":{\"version\":\"0.8.26+commit.8a97fa7a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"spender\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"deadline\",\"type\":\"uint256\"},{\"internalType\":\"uint8\",\"name\":\"v\",\"type\":\"uint8\"},{\"internalType\":\"bytes32\",\"name\":\"r\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"s\",\"type\":\"bytes32\"}],\"name\":\"permit\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{},\"title\":\"IStrategyPermit\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"notice\":\"Minimal interface for EIP-2612 permit on Octant TokenizedStrategy share tokens\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/interfaces/IStrategyPermit.sol\":\"IStrategyPermit\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[\":@octant-core/=lib/octant-v2-core/src/\",\":@openzeppelin/=lib/openzeppelin-contracts/\",\":forge-std/=lib/forge-std/src/\"],\"viaIR\":true},\"sources\":{\"src/interfaces/IStrategyPermit.sol\":{\"keccak256\":\"0x708ddf7051eb25858bb8d4a7ea9f849b4b9be2d6280fd8c5bb41ce43ace2c3ac\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://37476ace2a013611fd920902a85d87cc5e14367fb8627cba3946418375ab8e52\",\"dweb:/ipfs/Qmede1yFkNaGT94jGrcMJzaEbGurk9oAMEqmHXPnChni5J\"]}},\"version\":1}",
+  "metadata": {
+    "compiler": { "version": "0.8.26+commit.8a97fa7a" },
+    "language": "Solidity",
+    "output": {
+      "abi": [
+        {
+          "inputs": [
+            { "internalType": "address", "name": "owner", "type": "address" },
+            { "internalType": "address", "name": "spender", "type": "address" },
+            { "internalType": "uint256", "name": "value", "type": "uint256" },
+            {
+              "internalType": "uint256",
+              "name": "deadline",
+              "type": "uint256"
+            },
+            { "internalType": "uint8", "name": "v", "type": "uint8" },
+            { "internalType": "bytes32", "name": "r", "type": "bytes32" },
+            { "internalType": "bytes32", "name": "s", "type": "bytes32" }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "permit"
+        }
+      ],
+      "devdoc": { "kind": "dev", "methods": {}, "version": 1 },
+      "userdoc": { "kind": "user", "methods": {}, "version": 1 }
+    },
+    "settings": {
+      "remappings": [
+        "@octant-core/=lib/octant-v2-core/src/",
+        "@openzeppelin/=lib/openzeppelin-contracts/",
+        "forge-std/=lib/forge-std/src/"
+      ],
+      "optimizer": { "enabled": true, "runs": 200 },
+      "metadata": { "bytecodeHash": "ipfs" },
+      "compilationTarget": {
+        "src/interfaces/IStrategyPermit.sol": "IStrategyPermit"
+      },
+      "evmVersion": "cancun",
+      "libraries": {},
+      "viaIR": true
+    },
+    "sources": {
+      "src/interfaces/IStrategyPermit.sol": {
+        "keccak256": "0x708ddf7051eb25858bb8d4a7ea9f849b4b9be2d6280fd8c5bb41ce43ace2c3ac",
+        "urls": [
+          "bzz-raw://37476ace2a013611fd920902a85d87cc5e14367fb8627cba3946418375ab8e52",
+          "dweb:/ipfs/Qmede1yFkNaGT94jGrcMJzaEbGurk9oAMEqmHXPnChni5J"
+        ],
+        "license": "MIT"
+      }
+    },
+    "version": 1
+  },
+  "id": 51
+}

@@ -2,7 +2,7 @@
 import { publicClient } from "@/lib/chain";
 import type { Abi } from "viem";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
-import { RebasingWrapperAbi } from "@/abi/RebasingWrapper";
+import { AddressBook } from "@/lib/address-book";
 
 export type Strategy = {
   id: string;
@@ -39,15 +39,10 @@ export async function getActivity() {
 }
 
 // On-chain configuration (addresses injected via env)
-export const VAULT_ADDRESS = (process.env.NEXT_PUBLIC_VAULT || "") as `0x${string}`;
-export const WRAPPER_ADDRESS = (process.env.NEXT_PUBLIC_WRAPPER || "") as `0x${string}`;
+export const VAULT_ADDRESS = ((process.env.NEXT_PUBLIC_VAULT || "") as `0x${string}`) || (AddressBook.vaults.WETH as `0x${string}`);
 
 export const ajeyVault = VAULT_ADDRESS
   ? ({ address: VAULT_ADDRESS, abi: AjeyVaultAbi } as const)
-  : undefined;
-
-export const rebasingWrapper = WRAPPER_ADDRESS
-  ? ({ address: WRAPPER_ADDRESS, abi: RebasingWrapperAbi } as const)
   : undefined;
 
 // Minimal ERC20 interface for approvals/balances

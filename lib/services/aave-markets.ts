@@ -1,4 +1,4 @@
-import { publicClient } from "@/lib/chain";
+import { createPublicClient, defineChain, http } from "viem";
 
 // Minimal ABIs
 const IPool_ABI = [
@@ -70,6 +70,7 @@ const AaveOracle_ABI = [
 ] as const;
 
 const PoolAddressesProvider_ABI = [
+  { name: "getPool", type: "function", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
   { name: "getPriceOracle", type: "function", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
 ] as const;
 
@@ -77,6 +78,7 @@ const ERC20_MIN_ABI = [
   { name: "symbol", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "string", name: "" }] },
   { name: "decimals", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "uint8", name: "" }] },
   { name: "totalSupply", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "uint256", name: "" }] },
+  { name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] },
 ] as const;
 
 const ONE_BI = BigInt(1);
@@ -112,7 +114,7 @@ async function readReserveDataFlexible(pool: `0x${string}`, asset: `0x${string}`
   const abis = [IPool_getReserveData_V320, IPool_getReserveData_V31];
   for (const abi of abis) {
     try {
-      const data: any = await publicClient.readContract({ address: pool, abi, functionName: "getReserveData", args: [asset] });
+      const data: any = await ethClient.readContract({ address: pool, abi, functionName: "getReserveData", args: [asset] });
       return data;
     } catch {}
   }
@@ -128,120 +130,120 @@ export type AaveReserveSnapshot = {
   supplyAprPercent?: number;
   utilizationPercent?: number;
   availableLiquidityNative?: string;
-  tvlUSD?: string;
-  availableUSD?: string;
+  tvlUSD?: number;
+  availableUSD?: number;
   capacityHeadroomUSD?: string;
   isActive?: boolean;
   isFrozen?: boolean;
 };
 
-export async function fetchAaveSupplySnapshot(): Promise<{ reserves: AaveReserveSnapshot[]; oracle?: `0x${string}`; baseUnit?: string }>
-{
-  const POOL = ((process.env.AAVE_POOL_PROXY || process.env.AAVE_BASE_SEPOLIA_POOL) || "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27") as `0x${string}`;
-  const ADDRESSES_PROVIDER = (process.env.AAVE_ADDRESSES_PROVIDER || "") as `0x${string}` | "";
+// Ethereum mainnet client for Aave reads (chain id 1)
+const MAINNET_RPC_URL =
+  (process.env.ETH_MAINNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_ETH_MAINNET_RPC_URL ||
+    "https://eth.llamarpc.com");
+const MAINNET_CHAIN_ID = 1;
+const mainnetChain = defineChain({
+  id: MAINNET_CHAIN_ID,
+  name: "Ethereum",
+  network: "ethereum",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [MAINNET_RPC_URL] }, public: { http: [MAINNET_RPC_URL] } },
+  testnet: false,
+});
+const ethClient = createPublicClient({ chain: mainnetChain, transport: http(MAINNET_RPC_URL) });
 
-  let ORACLE: `0x${string}` | undefined = (process.env.AAVE_ORACLE as `0x${string}` | undefined);
-  if (!ORACLE && ADDRESSES_PROVIDER) {
-    try { ORACLE = await publicClient.readContract({ address: ADDRESSES_PROVIDER, abi: PoolAddressesProvider_ABI, functionName: "getPriceOracle" }) as `0x${string}`; } catch {}
-  }
+export async function fetchAaveSupplySnapshot(): Promise<{ network: "ethereum"; reserves: AaveReserveSnapshot[]; asOfBlock: string }> {
+  // Canonical Aave v3 Ethereum PoolAddressesProvider
+  const MAINNET_ADDRESSES_PROVIDER = "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb" as `0x${string}`;
+  const ADDRESSES_PROVIDER = ((process.env.AAVE_ADDRESSES_PROVIDER as `0x${string}` | undefined) || MAINNET_ADDRESSES_PROVIDER) as `0x${string}`;
 
-  const reserves = await publicClient.readContract({ address: POOL, abi: IPool_ABI, functionName: "getReservesList" }) as `0x${string}`[];
-  const prices: bigint[] | undefined = ORACLE
-    ? await publicClient.readContract({ address: ORACLE, abi: AaveOracle_ABI, functionName: "getAssetsPrices", args: [reserves] }) as bigint[]
-    : undefined;
-  let baseUnit: bigint | undefined;
-  if (ORACLE) {
-    try { baseUnit = await publicClient.readContract({ address: ORACLE, abi: AaveOracle_ABI, functionName: "BASE_CURRENCY_UNIT" }) as bigint; } catch {}
-  }
+  // Discover Pool + Oracle from the provider
+  const [POOL, ORACLE] = await Promise.all([
+    ethClient.readContract({ address: ADDRESSES_PROVIDER, abi: PoolAddressesProvider_ABI, functionName: "getPool" }) as Promise<`0x${string}`>,
+    ethClient.readContract({ address: ADDRESSES_PROVIDER, abi: PoolAddressesProvider_ABI, functionName: "getPriceOracle" }) as Promise<`0x${string}`>,
+  ]);
 
-  const out: AaveReserveSnapshot[] = [];
-  for (let i = 0; i < reserves.length; i++) {
-    const asset = reserves[i] as `0x${string}`;
-    let symbol = "?";
-    let decimals = 18;
-    try {
-      const [sym, dec] = await Promise.all([
-        publicClient.readContract({ address: asset, abi: ERC20_MIN_ABI, functionName: "symbol" }) as Promise<string>,
-        publicClient.readContract({ address: asset, abi: ERC20_MIN_ABI, functionName: "decimals" }) as Promise<number>,
-      ]);
-      symbol = sym;
-      decimals = Number(dec) || 18;
-    } catch {}
+  const baseUnit = await ethClient.readContract({ address: ORACLE, abi: AaveOracle_ABI, functionName: "BASE_CURRENCY_UNIT" }) as bigint;
 
-    // token addresses
-    let aToken: `0x${string}` = "0x0000000000000000000000000000000000000000";
-    let vDebt: `0x${string}` = "0x0000000000000000000000000000000000000000";
-    try { aToken = await publicClient.readContract({ address: POOL, abi: IPool_ABI, functionName: "getReserveAToken", args: [asset] }) as `0x${string}`; } catch {}
-    try { vDebt = await publicClient.readContract({ address: POOL, abi: IPool_ABI, functionName: "getReserveVariableDebtToken", args: [asset] }) as `0x${string}`; } catch {}
+  // Reserves list → filter to allowed canonical assets
+  const reservesAll = await ethClient.readContract({ address: POOL, abi: IPool_ABI, functionName: "getReservesList" }) as `0x${string}`[];
+  const ADDRS = {
+    WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    DAI:  "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+  } as const;
+  const allowed = new Set(Object.values(ADDRS).map((a) => a.toLowerCase()));
+  const reserves = reservesAll.filter((a) => allowed.has(a.toLowerCase()));
 
-    // reserve data
-    const resData: any = await readReserveDataFlexible(POOL, asset);
-    const configWord: bigint | undefined = (resData?.configuration?.data ?? resData?.[0]?.data ?? resData?.[0]) as bigint | undefined;
-    const cfg = decodeReserveConfigurationMap(configWord);
-    const supplyAprPercent = toPercentFromRay(resData?.currentLiquidityRate ?? resData?.[2]);
+  // Batch price fetch for focus set
+  const prices = await ethClient.readContract({ address: ORACLE, abi: AaveOracle_ABI, functionName: "getAssetsPrices", args: [reserves] }) as bigint[];
 
-    // supplies
-    let aSupply = BigInt(0);
-    let vSupply = BigInt(0);
-    try { aSupply = await publicClient.readContract({ address: aToken, abi: ERC20_MIN_ABI, functionName: "totalSupply" }) as bigint; } catch {}
-    try { vSupply = await publicClient.readContract({ address: vDebt, abi: ERC20_MIN_ABI, functionName: "totalSupply" }) as bigint; } catch {}
+  const out: AaveReserveSnapshot[] = await Promise.all(reserves.map(async (asset, i) => {
+    // Read reserve data + token metadata
+    const [resData, dec, sym] = await Promise.all([
+      readReserveDataFlexible(POOL, asset),
+      ethClient.readContract({ address: asset, abi: ERC20_MIN_ABI, functionName: "decimals" }) as Promise<number>,
+      ethClient.readContract({ address: asset, abi: ERC20_MIN_ABI, functionName: "symbol" }) as Promise<string>,
+    ]);
 
-    const available = aSupply > vSupply ? (aSupply - vSupply) : BigInt(0);
-    const utilizationPercent = aSupply === BigInt(0) ? 0 : (Number(vSupply) / Number(aSupply)) * 100;
-
-    // USD metrics
-    const price = prices?.[i];
-    let tvlUSD: string | undefined;
-    let availableUSD: string | undefined;
-    let capacityHeadroomUSD: string | undefined;
-    if (price !== undefined && baseUnit && baseUnit > BigInt(0)) {
-      // pow10 without BigInt exponent operator
-      let pow = BigInt(1);
-      for (let j = 0; j < decimals; j++) pow = pow * TEN_BI;
-      const tvlBase = (price * aSupply) / pow;
-      const availBase = (price * available) / pow;
-      // naive string scaling to base unit decimals
-      const baseDec = (() => { let d = 0, x = baseUnit; while (x > ONE_BI && x % TEN_BI === BigInt(0)) { x = x / TEN_BI; d++; } return d; })();
-      const fmt = (x: bigint) => {
-        const s = x.toString();
-        if (baseDec === 0) return s;
-        const pad = Math.max(0, baseDec - s.length);
-        const z = (pad ? "0".repeat(pad) : "") + s;
-        const head = z.slice(0, Math.max(0, z.length - baseDec)) || "0";
-        const tail = z.slice(-baseDec);
-        return `${head}.${tail}`.replace(/\.0+$/, "");
-      };
-      tvlUSD = fmt(tvlBase);
-      availableUSD = fmt(availBase);
-
-      if (cfg?.supplyCapRaw) {
-        const capRaw = BigInt(cfg.supplyCapRaw);
-        if (capRaw === BigInt(0)) capacityHeadroomUSD = "unlimited"; else {
-          const capNative = capRaw * pow;
-          const headNative = capNative > aSupply ? (capNative - aSupply) : BigInt(0);
-          capacityHeadroomUSD = fmt((price * headNative) / pow);
-        }
-      }
+    // Derive aToken address (prefer reserveData.aTokenAddress; fallback to explicit getter)
+    let aToken: `0x${string}` = (resData?.aTokenAddress || resData?.[8]) as `0x${string}`;
+    if (!aToken) {
+      try { aToken = await ethClient.readContract({ address: POOL, abi: IPool_ABI, functionName: "getReserveAToken", args: [asset] }) as `0x${string}`; } catch {}
     }
 
-    out.push({
+    // Variable debt token (optional)
+    let vDebt: `0x${string}` = "0x0000000000000000000000000000000000000000";
+    try { vDebt = await ethClient.readContract({ address: POOL, abi: IPool_ABI, functionName: "getReserveVariableDebtToken", args: [asset] }) as `0x${string}`; } catch {}
+
+    const [aTokenSupply, underlyingBal] = await Promise.all([
+      ethClient.readContract({ address: aToken, abi: ERC20_MIN_ABI, functionName: "totalSupply" }) as Promise<bigint>,
+      ethClient.readContract({ address: asset, abi: ERC20_MIN_ABI, functionName: "balanceOf", args: [aToken] }) as Promise<bigint>,
+    ]);
+
+    // Compute 10^dec without BigInt literal/exponent usage for broad TS targets
+    let unit = BigInt(1);
+    for (let j = 0; j < Number(dec); j++) unit = unit * TEN_BI;
+    const price = prices[i];
+    const priceUsd = Number(price) / Number(baseUnit);
+
+    const tvlUSD = Number(aTokenSupply) / Number(unit) * priceUsd;
+    const availableUSD = Number(underlyingBal) / Number(unit) * priceUsd;
+
+    const configWord: bigint | undefined = (resData?.configuration?.data ?? resData?.[0]?.data ?? resData?.[0]) as bigint | undefined;
+    const cfg = decodeReserveConfigurationMap(configWord);
+
+    let utilizationPercent: number | undefined;
+    try {
+      const vSupply = await ethClient.readContract({ address: vDebt, abi: ERC20_MIN_ABI, functionName: "totalSupply" }) as bigint;
+      utilizationPercent = aTokenSupply === BigInt(0) ? 0 : (Number(vSupply) / Number(aTokenSupply)) * 100;
+    } catch {}
+
+    return {
       asset,
-      symbol,
-      decimals,
+      symbol: sym,
+      decimals: Number(dec) || 18,
       aToken,
       variableDebtToken: vDebt,
-      supplyAprPercent,
+      supplyAprPercent: toPercentFromRay(resData?.currentLiquidityRate ?? resData?.[2]),
       utilizationPercent,
-      availableLiquidityNative: (Number(available) / 10 ** decimals).toString(),
+      availableLiquidityNative: (Number(underlyingBal) / Math.pow(10, Number(dec))).toString(),
       tvlUSD,
       availableUSD,
-      capacityHeadroomUSD,
+      capacityHeadroomUSD: String(Math.max(0, Math.floor(availableUSD))),
       isActive: cfg?.isActive,
       isFrozen: cfg?.isFrozen,
-    });
-  }
+    } as AaveReserveSnapshot;
+  }));
 
-  return { reserves: out, oracle: ORACLE, baseUnit: baseUnit ? baseUnit.toString() : undefined };
+  const blockNum = await ethClient.getBlockNumber();
+  return {
+    network: "ethereum",
+    reserves: out.sort((a, b) => (b.supplyAprPercent || 0) - (a.supplyAprPercent || 0)),
+    asOfBlock: blockNum.toString(),
+  };
 }
 
 

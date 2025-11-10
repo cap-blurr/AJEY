@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type VaultSummary, getAssetAddress, ERC20_MIN_ABI, ajeyVault } from "@/lib/services/vault";
 import { usePrivy, useWallets, useBaseAccountSdk } from "@privy-io/react-auth";
-import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError, formatEther } from "viem";
+import { createWalletClient, custom, encodeFunctionData, parseUnits, toHex, BaseError, ContractFunctionRevertedError, formatEther, maxUint256 } from "viem";
 import { baseSepolia } from "viem/chains";
 import { browserWsPublicClient, browserPublicClient } from "@/lib/chain";
 import { AjeyVaultAbi } from "@/abi/AjeyVault";
@@ -22,6 +22,9 @@ export default function OctantDonationProductCard() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [needReallocApproval, setNeedReallocApproval] = useState<boolean | null>(null);
   const [enablingRealloc, setEnablingRealloc] = useState(false);
+  const [needsOrchestratorApproval, setNeedsOrchestratorApproval] = useState<boolean>(false);
+  const [checkingOrchestratorApproval, setCheckingOrchestratorApproval] = useState<boolean>(false);
+  const [approvingOrchestrator, setApprovingOrchestrator] = useState<boolean>(false);
   const { user } = usePrivy();
   const { wallets } = useWallets();
   const reallocPromptedRef = useRef(false);
@@ -124,6 +127,34 @@ export default function OctantDonationProductCard() {
       }
     } catch {}
   }, []);
+
+  // Orchestrator approval need check (optional, only if configured)
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        setCheckingOrchestratorApproval(true);
+        setNeedsOrchestratorApproval(false);
+        const { getOrchestratorAddress } = await import("@/lib/address-book");
+        const orchestrator = getOrchestratorAddress();
+        if (!orchestrator) { setNeedsOrchestratorApproval(false); return; }
+        if (!amount) { setNeedsOrchestratorApproval(false); return; }
+        const { address: account } = await getActiveSigner();
+        if (!account) { setNeedsOrchestratorApproval(true); return; }
+        const token = "0x4200000000000000000000000000000000000006" as `0x${string}`;
+        const assets = parseUnits(amount, 18);
+        const allowance = await publicNavigatorReadAllowance(token, account, orchestrator);
+        if (!active) return;
+        setNeedsOrchestratorApproval(allowance < assets);
+      } catch {
+        if (!active) return;
+        setNeedsOrchestratorApproval(true);
+      } finally {
+        if (active) setCheckingOrchestratorApproval(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [amount, wallets, user]);
 
   useEffect(() => {
     let stopped = false;
@@ -456,78 +487,91 @@ export default function OctantDonationProductCard() {
               }}
               className="rounded-md border px-2 py-2 text-xs"
             >Max</button>
+            {/* Optional: ERC20 approval to Orchestrator before queuing */}
+            {!!(process.env.NEXT_PUBLIC_ORCHESTRATOR_ADDRESS || true) && (
+              <button
+                type="button"
+                disabled={approvingOrchestrator || checkingOrchestratorApproval || !amount}
+                onClick={async () => {
+                  try {
+                    setApprovingOrchestrator(true);
+                    const { getOrchestratorAddress } = await import("@/lib/address-book");
+                    const orchestrator = getOrchestratorAddress();
+                    if (!orchestrator) return;
+                    const { provider, address: account } = await getActiveSigner();
+                    if (!account) throw new Error("No connected address");
+                    await ensureBaseChain(provider);
+                    const token = "0x4200000000000000000000000000000000000006" as `0x${string}`;
+                    const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
+                    const { publicClient } = await import("@/lib/chain");
+                    const simApprove = await publicClient.simulateContract({
+                      address: token,
+                      abi: ERC20_MIN_ABI as any,
+                      functionName: "approve",
+                      args: [orchestrator, maxUint256],
+                      account,
+                    } as any);
+                    const req: any = simApprove.request;
+                    await client.writeContract(req);
+                    setNeedsOrchestratorApproval(false);
+                  } catch (e) {
+                    // eslint-disable-next-line no-console
+                    console.error("[octant] orchestrator approve failed", (e as any)?.message || e);
+                  } finally {
+                    setApprovingOrchestrator(false);
+                  }
+                }}
+                className="rounded-md border px-3 py-2 text-xs"
+              >{approvingOrchestrator ? "Approving…" : needsOrchestratorApproval ? "Approve Orchestrator" : "Approved"}</button>
+            )}
             <button
               disabled={!amount || submitting || !!data?.paused || !strategyValid}
               onClick={async () => {
-                if (!ajeyVault) return alert("Vault not configured");
                 try {
                   setSubmitting(true);
-                  const { provider, address: account } = await getActiveSigner();
+                  const { address: account } = await getActiveSigner();
                   if (!account) throw new Error("No connected address");
-                  // Require a selected strategy and compute its mix
                   if (!strategyValid) throw new Error("Select a donation strategy first");
                   const selected = computeStrategyMix(strategy);
-
-                  // Persist the chosen strategy/mix locally and log intent
+                  // Persist strategy + mix locally and log
                   try {
                     if (typeof window !== "undefined") {
                       window.localStorage.setItem("octant_donation_strategy", strategy as string);
                       window.localStorage.setItem("octant_donation_mix_v2", JSON.stringify(selected));
                     }
                   } catch {}
-                  try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "octant", step: "deposit_with_strategy", data: { account, strategy, mix: selected } }) }); } catch {}
-
-                  try { await ensureBaseChain(provider); } catch { throw new Error("Please switch your wallet network to Base Sepolia"); }
-
-                  const asset = await getAssetAddress();
-                  const decimals = (await publicNavigatorReadDecimals(asset)) || 18;
-                  const assets = parseUnits(amount, decimals);
-
-                  const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) });
-
-                  // Try ETH path first
-                  let usedEthPath = false;
-                  try {
-                    const { publicClient } = await import("@/lib/chain");
-                    const sim = await publicClient.simulateContract({ ...(ajeyVault as any), functionName: "depositEth", args: [account], value: assets, account } as any);
-                    const req: any = sim.request;
-                    await client.writeContract(req);
-                    usedEthPath = true;
-                  } catch {
-                    usedEthPath = false;
-                  }
-                  if (!usedEthPath) {
-                    const { publicClient } = await import("@/lib/chain");
-                    const WETH_BASE_CANONICAL = "0x4200000000000000000000000000000000000006";
-                    if ((asset as string).toLowerCase() === WETH_BASE_CANONICAL.toLowerCase()) {
-                      try {
-                        const simWrap = await publicClient.simulateContract({ address: asset, abi: [ { name: "deposit", type: "function", stateMutability: "payable", inputs: [], outputs: [] } ] as any, functionName: "deposit", args: [], value: assets, account } as any);
-                        const reqWrap: any = simWrap.request;
-                        await client.writeContract(reqWrap);
-                      } catch {
-                        throw new Error("WETH wrap failed; please ensure ETH balance and try again.");
-                      }
-                    }
-                    const allowance: bigint = await publicNavigatorReadAllowance(asset, account, ajeyVault.address);
-                    if (allowance < assets) {
-                      const simApprove = await publicClient.simulateContract({ address: asset, abi: ERC20_MIN_ABI as any, functionName: "approve", args: [ajeyVault.address, assets], account } as any);
-                      const reqApprove: any = simApprove.request;
-                      await client.writeContract(reqApprove);
-                    }
-                    const simDeposit = await publicClient.simulateContract({ ...(ajeyVault as any), functionName: "deposit", args: [assets, account], account } as any);
-                    const reqDep: any = simDeposit.request;
-                    await client.writeContract(reqDep);
-                  }
+                  try { fetch("/api/debug/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "octant", step: "queue_deposit_intent", data: { account, strategy, mix: selected, amount } }) }); } catch {}
+                  // Build intent for Agent per integration guide
+                  const WETH_BASE_CANONICAL = "0x4200000000000000000000000000000000000006";
+                  const amountWei = parseUnits(amount, 18).toString();
+                  const profile = strategy === "crypto_maxi" ? "MaxCrypto" : strategy === "balanced" ? "Balanced" : "MaxHumanitarian";
+                  const intent = {
+                    profile,
+                    from: account,
+                    inputAsset: WETH_BASE_CANONICAL,
+                    amountInWei: amountWei,
+                    targetAsset: WETH_BASE_CANONICAL,
+                    receiver: account,
+                    minAmountOutWei: "0",
+                    slippageBps: 50,
+                    donationMix: selected.map((m) => ({ address: m.address, pct: m.pct, label: m.label })),
+                  };
+                  await fetch("/api/intents/deposit", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ signedIntent: intent }),
+                  });
                   setAmount("");
+                  setStrategySaved(true);
                 } catch (e: any) {
                   // eslint-disable-next-line no-console
-                  console.error("[octant] deposit error", e?.message || e);
+                  console.error("[octant] queue deposit error", e?.message || e);
                 } finally {
                   setSubmitting(false);
                 }
               }}
               className="rounded-md border px-4 py-2 text-sm"
-            >{data?.paused ? "Paused" : submitting ? "Submitting..." : "Invest with Mix"}</button>
+            >{data?.paused ? "Paused" : submitting ? "Queuing..." : "Queue Deposit"}</button>
           </div>
           <div className="flex flex-wrap items-center gap-3 md:justify-end">
             <input

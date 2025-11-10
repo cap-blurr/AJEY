@@ -33,8 +33,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "idleWei and vaultAddress required" }, { status: 400 });
   }
 
-  // 1) Fetch live Aave snapshot for reasoning context
-  const market = await fetchAaveSupplySnapshot();
+  // 1) Fetch live Aave snapshot for reasoning context and restrict to allowed assets
+  const marketRaw = await fetchAaveSupplySnapshot();
+  const ALLOWED = new Set([
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // USDC
+    "0xdac17f958d2ee523a2206206994597c13d831ec7", // USDT
+    "0x6b175474e89094c44da98b954eedeac495271d0f", // DAI
+  ]);
+  const market = {
+    ...marketRaw,
+    reserves: (marketRaw.reserves || []).filter((r: any) => ALLOWED.has(String(r.asset).toLowerCase())),
+  };
 
   // Helper: format wei to ETH with 4 decimal places, floored
   const formatEth4dp = (weiStr: string) => {

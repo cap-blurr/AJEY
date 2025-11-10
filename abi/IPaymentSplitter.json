@@ -1,0 +1,132 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "initialize",
+      "inputs": [
+        { "name": "payees", "type": "address[]", "internalType": "address[]" },
+        { "name": "shares_", "type": "uint256[]", "internalType": "uint256[]" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "release",
+      "inputs": [
+        { "name": "token", "type": "address", "internalType": "address" },
+        { "name": "account", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "shares",
+      "inputs": [
+        { "name": "account", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "totalShares",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    }
+  ],
+  "bytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "deployedBytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "methodIdentifiers": {
+    "initialize(address[],uint256[])": "7fbbe46f",
+    "release(address,address)": "48b75044",
+    "shares(address)": "ce7c2ac2",
+    "totalShares()": "3a98ef39"
+  },
+  "rawMetadata": "{\"compiler\":{\"version\":\"0.8.26+commit.8a97fa7a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address[]\",\"name\":\"payees\",\"type\":\"address[]\"},{\"internalType\":\"uint256[]\",\"name\":\"shares_\",\"type\":\"uint256[]\"}],\"name\":\"initialize\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"name\":\"release\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"name\":\"shares\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"totalShares\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{},\"title\":\"IPaymentSplitter (Octant v2 core)\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"notice\":\"Minimal interface for Octant's PaymentSplitter\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/interfaces/octant/IPaymentSplitter.sol\":\"IPaymentSplitter\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[\":@octant-core/=lib/octant-v2-core/src/\",\":@openzeppelin/=lib/openzeppelin-contracts/\",\":forge-std/=lib/forge-std/src/\"],\"viaIR\":true},\"sources\":{\"src/interfaces/octant/IPaymentSplitter.sol\":{\"keccak256\":\"0x94475663cfbfe4f175341ec7c565a9c1526868f01c242eff00a53d954f70b7b2\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://4dfba92b5e551828cd3fe39e92c46276ed9fa7ee03e81103df19f5fc9bd29d49\",\"dweb:/ipfs/QmVah3bTtkuz9RkzVVjrH3VUTsPkJo3WkRW3JZDPB7edmQ\"]}},\"version\":1}",
+  "metadata": {
+    "compiler": { "version": "0.8.26+commit.8a97fa7a" },
+    "language": "Solidity",
+    "output": {
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "payees",
+              "type": "address[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "shares_",
+              "type": "uint256[]"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "initialize"
+        },
+        {
+          "inputs": [
+            { "internalType": "address", "name": "token", "type": "address" },
+            { "internalType": "address", "name": "account", "type": "address" }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "release"
+        },
+        {
+          "inputs": [
+            { "internalType": "address", "name": "account", "type": "address" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "shares",
+          "outputs": [
+            { "internalType": "uint256", "name": "", "type": "uint256" }
+          ]
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "totalShares",
+          "outputs": [
+            { "internalType": "uint256", "name": "", "type": "uint256" }
+          ]
+        }
+      ],
+      "devdoc": { "kind": "dev", "methods": {}, "version": 1 },
+      "userdoc": { "kind": "user", "methods": {}, "version": 1 }
+    },
+    "settings": {
+      "remappings": [
+        "@octant-core/=lib/octant-v2-core/src/",
+        "@openzeppelin/=lib/openzeppelin-contracts/",
+        "forge-std/=lib/forge-std/src/"
+      ],
+      "optimizer": { "enabled": true, "runs": 200 },
+      "metadata": { "bytecodeHash": "ipfs" },
+      "compilationTarget": {
+        "src/interfaces/octant/IPaymentSplitter.sol": "IPaymentSplitter"
+      },
+      "evmVersion": "cancun",
+      "libraries": {},
+      "viaIR": true
+    },
+    "sources": {
+      "src/interfaces/octant/IPaymentSplitter.sol": {
+        "keccak256": "0x94475663cfbfe4f175341ec7c565a9c1526868f01c242eff00a53d954f70b7b2",
+        "urls": [
+          "bzz-raw://4dfba92b5e551828cd3fe39e92c46276ed9fa7ee03e81103df19f5fc9bd29d49",
+          "dweb:/ipfs/QmVah3bTtkuz9RkzVVjrH3VUTsPkJo3WkRW3JZDPB7edmQ"
+        ],
+        "license": "MIT"
+      }
+    },
+    "version": 1
+  },
+  "id": 55
+}

@@ -155,7 +155,7 @@ export async function generateReasoningPlan(
   const instructionsPreset = {
     version: 1,
     objective:
-      "Propose a single target allocation plan for WETH supply-only (no borrowing) on Base Sepolia.",
+      "Propose a single target allocation plan for supply-only (no borrowing) using the provided market reserves. Rank and choose the best reserve from the list provided.",
     policy: {
       filter: { requireActive: true, requireNotFrozen: true, minAvailableUSD: "0" },
       rank: ["supplyAprPercent desc", "availableUSD desc", "tvlUSD desc"],
@@ -163,7 +163,6 @@ export async function generateReasoningPlan(
         "Only consider supplyAprPercent; ignore borrow-related metrics.",
         "Require availableUSD > 0 and capacity headroom if capped.",
         "Proposed amountWei must be <= vault.idleWei and within supply cap headroom.",
-        "Vault asset is WETH; pool selection is fixed and does not require an address.",
         "Use ETH increments >= 0.0001 ETH. Round down to the nearest 0.0001 ETH when converting to wei.",
       ],
     },

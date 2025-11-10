@@ -2,13 +2,15 @@ import { publicClient, browserPublicClient } from "@/lib/chain";
 import { ajeyVault } from "@/lib/services/vault";
 import { AgentReallocatorAbi } from "@/abi/AgentReallocator";
 import { maxUint256 } from "viem";
+import { getReallocatorAddress } from "@/lib/address-book";
 
 const MAX_UINT256 = maxUint256;
 
 export function getAgentReallocatorAddress(): `0x${string}` {
-  const addr = (process.env.NEXT_PUBLIC_AGENT_REALLOCATOR || "").trim();
-  if (!addr) throw new Error("NEXT_PUBLIC_AGENT_REALLOCATOR not set");
-  return addr as `0x${string}`;
+  // Prefer env; fallback to address book
+  const env = (process.env.NEXT_PUBLIC_AGENT_REALLOCATOR || process.env.AGENT_REALLOCATOR_ADDRESS || "").trim();
+  if (env && env.startsWith("0x")) return env as `0x${string}`;
+  return getReallocatorAddress();
 }
 
 export const agentReallocator = {
